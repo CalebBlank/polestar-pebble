@@ -1,5 +1,3 @@
-var Settings = require('settings');
-
 // ── Constants ─────────────────────────────────────────────────────────────────
 var KEY_CMD              = 0;
 var KEY_STATE_LOCKED     = 1;
