@@ -76,15 +76,15 @@ static struct {
 } s_state = {
   .locked       = true,
   .climate_on   = false,
-  .charge_min   = -1,
-  .charge_pct   = 0,
-  .range_km     = 0,
-  .odo_km       = 0,
-  .location     = "loading...",
-  .outside_temp = 0,
-  .is_charging  = false,
+  .charge_min   = 25,
+  .charge_pct   = 80,
+  .range_km     = 180,
+  .odo_km       = 12305,
+  .location     = "136 S Ash St, Palatine IL",
+  .outside_temp = 60,
+  .is_charging  = true,
   .use_metric   = true,
-  .loading      = true,
+  .loading      = false,
   .error        = false,
 };
 
