@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Polestar Pebble — Settings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #fff;
+      padding: 24px 16px 40px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #F5820A;
+    }
+    p.sub {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 28px;
+    }
+    .section {
+      background: #1e1e1e;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .section h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #888;
+      margin-bottom: 12px;
+    }
+    label {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 4px;
+      color: #ccc;
+    }
+    input[type="email"],
+    input[type="password"],
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      background: #2a2a2a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 16px;
+      margin-bottom: 14px;
+      outline: none;
+    }
+    input:focus { border-color: #F5820A; }
+    .toggle-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+    }
+    .toggle-row span { font-size: 15px; }
+    input[type="checkbox"] {
+      width: 42px;
+      height: 24px;
+      accent-color: #F5820A;
+      cursor: pointer;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      background: #F5820A;
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-size: 17px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    button:active { background: #d46e08; }
+    .error { color: #ff5555; font-size: 13px; margin-top: 6px; display: none; }
+  </style>
+</head>
+<body>
+  <h1>Polestar</h1>
+  <p class="sub">Connect your Polestar account to your watch.</p>
+
+  <div class="section">
+    <h2>Account</h2>
+    <label for="email">Polestar email</label>
+    <input type="email" id="email" placeholder="you@example.com" autocomplete="email" />
+    <label for="password">Password</label>
+    <input type="password" id="password" placeholder="••••••••" autocomplete="current-password" />
+    <div class="error" id="err">Email and password are required.</div>
+  </div>
+
+  <div class="section">
+    <h2>Units</h2>
+    <div class="toggle-row">
+      <span>Use metric (km, °C)</span>
+      <input type="checkbox" id="metric" checked />
+    </div>
+  </div>
+
+  <button onclick="save()">Save to Watch</button>
+
+  <script>
+    // Pre-fill saved values
+    try {
+      var saved = JSON.parse(localStorage.getItem('polestar_creds') || '{}');
+      if (saved.username) document.getElementById('email').value = saved.username;
+    } catch(e) {}
+    var savedMetric = localStorage.getItem('use_metric');
+    if (savedMetric === 'false') document.getElementById('metric').checked = false;
+
+    function save() {
+      var email    = document.getElementById('email').value.trim();
+      var password = document.getElementById('password').value;
+      var metric   = document.getElementById('metric').checked;
+      var err      = document.getElementById('err');
+
+      if (!email || !password) {
+        err.style.display = 'block';
+        return;
+      }
+      err.style.display = 'none';
+
+      localStorage.setItem('polestar_creds', JSON.stringify({ username: email, password: password }));
+      localStorage.setItem('use_metric', metric ? 'true' : 'false');
+
+      var result = encodeURIComponent(JSON.stringify({ metric: metric }));
+      location.href = 'pebblejs://close#' + result;
+    }
+  </script>
+</body>
+</html>

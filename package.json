@@ -1,0 +1,34 @@
+{
+  "name": "polestar-pebble",
+  "author": "Caleb Blankenbaker",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "pebble": {
+    "sdkVersion": "3",
+    "displayName": "Polestar",
+    "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "watchapp": {
+      "watchface": false
+    },
+    "capabilities": ["configurable", "location"],
+    "targetPlatforms": ["basalt", "chalk", "diorite"],
+    "resources": {
+      "media": []
+    },
+    "messageKeys": {
+      "CMD": 0,
+      "STATE_LOCKED": 1,
+      "STATE_CLIMATE": 2,
+      "STATE_CHARGE_MIN": 3,
+      "STATE_CHARGE_PCT": 4,
+      "STATE_RANGE_KM": 5,
+      "STATE_ODO_KM": 6,
+      "STATE_LOCATION": 7,
+      "STATE_OUTSIDE_TEMP": 8,
+      "STATE_IS_CHARGING": 9,
+      "SETTING_UNITS": 10,
+      "SETTING_API_KEY": 11,
+      "ERROR": 12
+    }
+  }
+}
