@@ -402,17 +402,18 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
 
 // Draws a % glyph sized to sit beside LECO_42_NUMBERS digits.
 // LECO_42_NUMBERS only contains digit glyphs (no %) so we draw it manually.
+// Blocky % glyph — two filled squares + thick diagonal — matches LECO's geometric weight.
 static void draw_percent_glyph(GContext *ctx, GPoint origin, int size) {
-  int r = MAX(size / 5, 3);
-  int sw = MAX(size / 10, 2);
+  int sq = MAX(size * 3 / 10, 4);  // square size (~8px at size=28)
+  int sw = MAX(size / 6,      3);  // diagonal stroke width (~5px at size=28)
   graphics_context_set_fill_color(ctx, COLOR_FG);
-  graphics_fill_circle(ctx, GPoint(origin.x + r + 1,          origin.y + r + 1),          r);
-  graphics_fill_circle(ctx, GPoint(origin.x + size - r - 1,   origin.y + size - r - 1),   r);
+  graphics_fill_rect(ctx, GRect(origin.x,                  origin.y,                  sq, sq), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(origin.x + size - sq,      origin.y + size - sq,      sq, sq), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, sw);
   graphics_draw_line(ctx,
-    GPoint(origin.x + size - 2, origin.y + 2),
-    GPoint(origin.x + 2,        origin.y + size - 2));
+    GPoint(origin.x + size - 1, origin.y + 1),
+    GPoint(origin.x + 1,        origin.y + size - 1));
 }
 
 static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
