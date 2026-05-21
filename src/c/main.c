@@ -48,8 +48,11 @@
 #define COLOR_DIM   GColorLightGray
 
 // ── Layout ────────────────────────────────────────────────────────────────────
+// Gabbro has rx=18 rounded corners — need wider inset to stay inside the mask
 #ifdef PBL_ROUND
   #define INSET_X  22
+#elif defined(PBL_PLATFORM_GABBRO)
+  #define INSET_X  16
 #else
   #define INSET_X   8
 #endif
@@ -79,7 +82,7 @@ static struct {
   .location     = "136 S Ash St, Palatine IL",
   .outside_temp = 60,
   .is_charging  = true,
-  .use_metric   = true,
+  .use_metric   = false,
   .error        = false,
 };
 
@@ -169,39 +172,54 @@ static void draw_icon_charger(GContext *ctx, GRect r) {
 
 static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int cx = r.origin.x + r.size.w / 2;
-  int bw = r.size.w * 7 / 10;
-  int bh = bw * 55 / 100;
-  int by = r.origin.y + r.size.h / 2 - bh / 4;
+
+  // Scale body to fit available height. From Figma: body=72×64, shackle adds
+  // arm_h(21)+arc_r(16)=37px above body → total ~101px for bw=72.
+  int max_bw = r.size.h * 5 / 7;
+  int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw);
+  int bh     = bw * 8 / 9;    // 72→64px (matches Figma body height exactly)
+  int arm_h  = bw * 29 / 100; // 72→21px (arc center to body top)
+  int arc_r  = bw * 22 / 100; // 72→16px (center-of-stroke shackle radius)
+  int arm_sw = bw * 19 / 100; // 72→14px (shackle stroke width, Figma outer-inner)
+  arm_sw = MAX(arm_sw, 4);
+
+  // Center the entire icon (arc top → body bottom) vertically in r
+  int total_h = arc_r + arm_h + bh;
+  int by = r.origin.y + (r.size.h - total_h) / 2 + arc_r + arm_h;
   int bx = cx - bw / 2;
 
+  // Shackle arc center: body_top minus arm height
+  // Unlocked: shift arc well off the right edge so it disappears
+  int arc_cx = locked ? cx : cx + bw * 2;
+  int arc_cy = by - arm_h;
+
+  // Shackle arms (filled rects, white, extend from arc center down to body top)
+  graphics_context_set_fill_color(ctx, COLOR_FG);
+  graphics_fill_rect(ctx,
+    GRect(arc_cx - arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0, GCornerNone);
+  graphics_fill_rect(ctx,
+    GRect(arc_cx + arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0, GCornerNone);
+
+  // Shackle arc (thick white stroke, top semicircle)
+  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_width(ctx, arm_sw);
+  graphics_draw_arc(ctx,
+    GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2),
+    GOvalScaleModeFitCircle,
+    DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(180));
+
+  // Lock body: white fill + black outline
   icon_fill(ctx);
   graphics_fill_rect(ctx, GRect(bx, by, bw, bh), 5, GCornersAll);
   icon_stroke(ctx);
   graphics_draw_round_rect(ctx, GRect(bx, by, bw, bh), 5);
 
-  graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_circle(ctx, GPoint(cx, by + bh / 2 - 3), 4);
-  graphics_fill_rect(ctx, GRect(cx - 2, by + bh / 2 - 1, 5, 8), 0, GCornerNone);
-
-  int sr = bw * 3 / 8;
-  int sy = by - sr + 2;
-  graphics_context_set_stroke_color(ctx, COLOR_FG);
-  graphics_context_set_stroke_width(ctx, 5);
-  if (locked) {
-    graphics_draw_arc(ctx, GRect(cx - sr, sy, sr * 2, sr * 2),
-                      GOvalScaleModeFitCircle,
-                      DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(180));
-  } else {
-    graphics_draw_arc(ctx, GRect(cx - sr + bw / 4, sy - sr / 2, sr * 2, sr * 2),
-                      GOvalScaleModeFitCircle,
-                      DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(180));
-  }
-  icon_stroke(ctx);
-  if (locked) {
-    graphics_draw_arc(ctx, GRect(cx - sr, sy, sr * 2, sr * 2),
-                      GOvalScaleModeFitCircle,
-                      DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(180));
-  }
+  // Keyhole: horizontal black line centered in body (matches Figma Frame 9 x=94-106, y=125)
+  int kl = bw * 9 / 100; // half-length ≈6px at bw=72
+  int ky = by + bh * 52 / 100;
+  graphics_context_set_stroke_color(ctx, COLOR_DARK);
+  graphics_context_set_stroke_width(ctx, MAX(arm_sw * 2 / 5, 3));
+  graphics_draw_line(ctx, GPoint(cx - kl, ky), GPoint(cx + kl, ky));
 }
 
 static void draw_icon_climate(GContext *ctx, GRect r, bool on) {
@@ -290,10 +308,10 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
 
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, number, fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
-            GRect(INSET_X, y, w, 52),
+            GRect(INSET_X, y, w, 56),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 52, w, 30),
+            GRect(INSET_X, y + 56, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
 }
 
@@ -382,10 +400,31 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
     GRect(bounds.size.w - INSET_X - 54, bounds.size.h - 64, 50, 56));
 }
 
+// Draws a % glyph sized to sit beside LECO_42_NUMBERS digits.
+// LECO_42_NUMBERS only contains digit glyphs (no %) so we draw it manually.
+static void draw_percent_glyph(GContext *ctx, GPoint origin, int size) {
+  int r = MAX(size / 5, 3);
+  int sw = MAX(size / 10, 2);
+  graphics_context_set_fill_color(ctx, COLOR_FG);
+  graphics_fill_circle(ctx, GPoint(origin.x + r + 1,          origin.y + r + 1),          r);
+  graphics_fill_circle(ctx, GPoint(origin.x + size - r - 1,   origin.y + size - r - 1),   r);
+  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_width(ctx, sw);
+  graphics_draw_line(ctx,
+    GPoint(origin.x + size - 2, origin.y + 2),
+    GPoint(origin.x + 2,        origin.y + size - 2));
+}
+
 static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   char num[8];
-  snprintf(num, sizeof(num), "%d%%", s_state.charge_pct);
+  snprintf(num, sizeof(num), "%d", s_state.charge_pct);
   draw_big_stat(ctx, bounds, num, "charged");
+  // LECO_42_NUMBERS digits are ~26px wide each; draw % glyph after the number
+  int digits   = s_state.charge_pct >= 100 ? 3 : (s_state.charge_pct >= 10 ? 2 : 1);
+  int glyph_sz = 28;
+  draw_percent_glyph(ctx,
+    GPoint(INSET_X + digits * 26 + 4, CONTENT_Y + 8),
+    glyph_sz);
   draw_car_bottom(ctx, bounds);
 }
 
