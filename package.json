@@ -4,14 +4,14 @@
   "version": "1.0.0",
   "keywords": ["pebble-app"],
   "pebble": {
-    "sdkVersion": "3",
+    "sdkVersion": "4",
     "displayName": "Polestar",
     "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "watchapp": {
       "watchface": false
     },
     "capabilities": ["configurable", "location"],
-    "targetPlatforms": ["basalt", "chalk", "diorite"],
+    "targetPlatforms": ["basalt", "chalk", "diorite", "emery", "gabbro"],
     "resources": {
       "media": []
     },

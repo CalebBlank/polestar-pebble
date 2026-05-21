@@ -3,6 +3,9 @@
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
 
 // ── Message / command keys ────────────────────────────────────────────────────
 #define KEY_CMD                0
@@ -36,22 +39,22 @@
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 #ifdef PBL_COLOR
-  #define COLOR_BG    GColorOrange
+  #define COLOR_BG  GColorOrange
 #else
-  #define COLOR_BG    GColorBlack
+  #define COLOR_BG  GColorBlack
 #endif
-#define COLOR_FG      GColorWhite
-#define COLOR_DARK    GColorBlack
-#define COLOR_DIM     GColorLightGray
+#define COLOR_FG    GColorWhite
+#define COLOR_DARK  GColorBlack
+#define COLOR_DIM   GColorLightGray
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 #ifdef PBL_ROUND
-  #define INSET_X   22
-  #define INSET_TOP  6
+  #define INSET_X  22
 #else
-  #define INSET_X    8
-  #define INSET_TOP  4
+  #define INSET_X   8
 #endif
+// Content starts just below the StatusBarLayer (16 px) with 2 px gap
+#define CONTENT_Y (STATUS_BAR_LAYER_HEIGHT + 2)
 
 // ── App state ─────────────────────────────────────────────────────────────────
 static struct {
@@ -80,14 +83,16 @@ static struct {
   .error        = false,
 };
 
-static int                s_page = PAGE_CLIMATE;
-static Window            *s_window;
-static Layer             *s_canvas;
-static SimpleMenuLayer   *s_action_menu_layer;
-static Window            *s_action_window;
+static int               s_page = PAGE_CLIMATE;
+static Window           *s_window;
+static Layer            *s_canvas;
+static StatusBarLayer   *s_status_bar;
+static TextLayer        *s_page_label;
+static char              s_page_buf[8];
+static SimpleMenuLayer  *s_action_menu_layer;
+static Window           *s_action_window;
 
 // ── Icon drawing ──────────────────────────────────────────────────────────────
-// Style: fill white, stroke black — matches Figma illustration look.
 
 static void icon_fill(GContext *ctx) {
   graphics_context_set_fill_color(ctx, COLOR_FG);
@@ -98,86 +103,88 @@ static void icon_stroke(GContext *ctx) {
 }
 
 static void draw_icon_car(GContext *ctx, GRect r) {
-  int bx = r.origin.x, by = r.origin.y + r.size.h / 3;
-  int bw = r.size.w,   bh = r.size.h * 2 / 3;
-  int wr = 10;
-  int wy = by + bh - wr - 1;
+  int x = r.origin.x, y = r.origin.y, w = r.size.w, h = r.size.h;
 
-  // Body
-  icon_fill(ctx);
-  graphics_fill_rect(ctx, GRect(bx, by, bw, bh - wr), 6, GCornersAll);
-  icon_stroke(ctx);
-  graphics_draw_round_rect(ctx, GRect(bx, by, bw, bh - wr), 6);
+  int wr  = h * 3 / 11;
+  int wy  = y + h - wr;
+  int wlx = x + w / 4;
+  int wrx = x + w * 3 / 4;
+  int sill_y = wy - h / 5;
+  int sill_h = (wy - sill_y) + wr;
+  int cab_x = x + w / 7;
+  int cab_w = w * 5 / 7;
+  int cab_y = y + 2;
+  int cab_h = sill_y - cab_y + 6;
 
-  // Roof
-  int rx = bx + bw / 5, ry = by - r.size.h / 5;
-  int rw = bw * 3 / 5,  rh = r.size.h / 5 + 3;
   icon_fill(ctx);
-  graphics_fill_rect(ctx, GRect(rx, ry, rw, rh), 5, GCornersTop);
-  icon_stroke(ctx);
-  graphics_draw_round_rect(ctx, GRect(rx, ry, rw, rh), 5);
+  graphics_fill_rect(ctx, GRect(x + 2, sill_y, w - 4, sill_h), 6, GCornersAll);
+  graphics_fill_rect(ctx, GRect(cab_x, cab_y, cab_w, cab_h), 12, GCornersTop);
+  graphics_fill_circle(ctx, GPoint(wlx, wy), wr);
+  graphics_fill_circle(ctx, GPoint(wrx, wy), wr);
 
-  // Wheels
-  icon_fill(ctx);
-  graphics_fill_circle(ctx, GPoint(bx + bw / 4, wy), wr);
-  graphics_fill_circle(ctx, GPoint(bx + bw * 3 / 4, wy), wr);
   icon_stroke(ctx);
-  graphics_draw_circle(ctx, GPoint(bx + bw / 4, wy), wr);
-  graphics_draw_circle(ctx, GPoint(bx + bw * 3 / 4, wy), wr);
-  // Wheel centres (dark dots)
+  graphics_draw_round_rect(ctx, GRect(x + 2, sill_y, w - 4, sill_h), 6);
+  graphics_draw_round_rect(ctx, GRect(cab_x, cab_y, cab_w, cab_h), 12);
+  graphics_draw_circle(ctx, GPoint(wlx, wy), wr);
+  graphics_draw_circle(ctx, GPoint(wrx, wy), wr);
+
+  // White stroke erases the cabin/sill seam → unified silhouette
+  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_width(ctx, 5);
+  graphics_draw_line(ctx,
+    GPoint(cab_x + 5, sill_y),
+    GPoint(cab_x + cab_w - 5, sill_y));
+
   graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_circle(ctx, GPoint(bx + bw / 4, wy), 3);
-  graphics_fill_circle(ctx, GPoint(bx + bw * 3 / 4, wy), 3);
+  graphics_fill_circle(ctx, GPoint(wlx, wy), 4);
+  graphics_fill_circle(ctx, GPoint(wrx, wy), 4);
 }
 
 static void draw_icon_charger(GContext *ctx, GRect r) {
-  int cx = r.origin.x + r.size.w / 2;
-  int ty = r.origin.y;
-  int by = r.origin.y + r.size.h;
-  int hw = 18, hh = r.size.h * 5 / 8;
+  int cx  = r.origin.x + r.size.w / 2;
+  int ty  = r.origin.y;
+  int by  = r.origin.y + r.size.h;
+  int hw  = r.size.w * 9 / 20;   // half-width of body
+  int hh  = r.size.h * 11 / 20;  // height of body
+  int prong_x = hw / 3;
 
-  // Handle body
   icon_fill(ctx);
   graphics_fill_rect(ctx, GRect(cx - hw, ty + 6, hw * 2, hh), 6, GCornersAll);
   icon_stroke(ctx);
   graphics_draw_round_rect(ctx, GRect(cx - hw, ty + 6, hw * 2, hh), 6);
 
-  // Prongs
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 3);
-  graphics_draw_line(ctx, GPoint(cx - 7, ty), GPoint(cx - 7, ty + 8));
-  graphics_draw_line(ctx, GPoint(cx + 7, ty), GPoint(cx + 7, ty + 8));
+  graphics_draw_line(ctx, GPoint(cx - prong_x, ty), GPoint(cx - prong_x, ty + 8));
+  graphics_draw_line(ctx, GPoint(cx + prong_x, ty), GPoint(cx + prong_x, ty + 8));
 
-  // Cable
-  graphics_draw_line(ctx, GPoint(cx, ty + 6 + hh), GPoint(cx, by));
+  int tip_r = MAX(r.size.w / 8, 5);
+  graphics_draw_line(ctx, GPoint(cx, ty + 6 + hh), GPoint(cx, by - tip_r));
 
-  // Plug tip
   icon_fill(ctx);
-  graphics_fill_circle(ctx, GPoint(cx, by), 6);
+  graphics_fill_circle(ctx, GPoint(cx, by - tip_r), tip_r);
   icon_stroke(ctx);
-  graphics_draw_circle(ctx, GPoint(cx, by), 6);
+  graphics_draw_circle(ctx, GPoint(cx, by - tip_r), tip_r);
 }
 
 static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int cx = r.origin.x + r.size.w / 2;
-  int bw = 44, bh = 32;
-  int by = r.origin.y + r.size.h / 2;
+  int bw = r.size.w * 7 / 10;
+  int bh = bw * 55 / 100;
+  int by = r.origin.y + r.size.h / 2 - bh / 4;
   int bx = cx - bw / 2;
 
-  // Body
   icon_fill(ctx);
   graphics_fill_rect(ctx, GRect(bx, by, bw, bh), 5, GCornersAll);
   icon_stroke(ctx);
   graphics_draw_round_rect(ctx, GRect(bx, by, bw, bh), 5);
 
-  // Keyhole
   graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_circle(ctx, GPoint(cx, by + bh / 2 - 4), 5);
-  graphics_fill_rect(ctx, GRect(cx - 3, by + bh / 2 - 2, 6, 10), 0, GCornerNone);
+  graphics_fill_circle(ctx, GPoint(cx, by + bh / 2 - 3), 4);
+  graphics_fill_rect(ctx, GRect(cx - 2, by + bh / 2 - 1, 5, 8), 0, GCornerNone);
 
-  // Shackle (arc)
-  int sr = 14;
-  int sy = by - sr + 4;
+  int sr = bw * 3 / 8;
+  int sy = by - sr + 2;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 5);
   if (locked) {
@@ -185,12 +192,10 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
                       GOvalScaleModeFitCircle,
                       DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(180));
   } else {
-    // Open: right side only, shifted up
-    graphics_draw_arc(ctx, GRect(cx - sr + 12, sy - 8, sr * 2, sr * 2),
+    graphics_draw_arc(ctx, GRect(cx - sr + bw / 4, sy - sr / 2, sr * 2, sr * 2),
                       GOvalScaleModeFitCircle,
                       DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(180));
   }
-  // Shackle outline over
   icon_stroke(ctx);
   if (locked) {
     graphics_draw_arc(ctx, GRect(cx - sr, sy, sr * 2, sr * 2),
@@ -200,8 +205,8 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
 }
 
 static void draw_icon_climate(GContext *ctx, GRect r, bool on) {
-  int cx = r.origin.x + r.size.w / 2;
-  int cy = r.origin.y + r.size.h / 2;
+  int cx     = r.origin.x + r.size.w / 2;
+  int cy     = r.origin.y + r.size.h / 2;
   int radius = MIN(r.size.w, r.size.h) / 2 - 2;
   GColor col = on ? COLOR_FG : COLOR_DIM;
 
@@ -209,17 +214,14 @@ static void draw_icon_climate(GContext *ctx, GRect r, bool on) {
   graphics_context_set_stroke_width(ctx, 2);
   graphics_context_set_fill_color(ctx, col);
 
-  // Centre circle
   graphics_fill_circle(ctx, GPoint(cx, cy), 5);
 
-  // 6 spokes with crossbars (snowflake)
   for (int i = 0; i < 6; i++) {
     int32_t angle = DEG_TO_TRIGANGLE(i * 60);
     int ex = cx + (radius * sin_lookup(angle) / TRIG_MAX_RATIO);
     int ey = cy - (radius * cos_lookup(angle) / TRIG_MAX_RATIO);
     graphics_draw_line(ctx, GPoint(cx, cy), GPoint(ex, ey));
 
-    // Crossbar nubs
     int32_t perp = DEG_TO_TRIGANGLE(i * 60 + 90);
     int mx = cx + ((radius * 6 / 10) * sin_lookup(angle) / TRIG_MAX_RATIO);
     int my = cy - ((radius * 6 / 10) * cos_lookup(angle) / TRIG_MAX_RATIO);
@@ -230,8 +232,8 @@ static void draw_icon_climate(GContext *ctx, GRect r, bool on) {
 }
 
 static void draw_icon_globe(GContext *ctx, GRect r) {
-  int cx = r.origin.x + r.size.w / 2;
-  int cy = r.origin.y + r.size.h / 2;
+  int cx     = r.origin.x + r.size.w / 2;
+  int cy     = r.origin.y + r.size.h / 2;
   int radius = MIN(r.size.w, r.size.h) / 2 - 3;
 
   icon_fill(ctx);
@@ -239,24 +241,33 @@ static void draw_icon_globe(GContext *ctx, GRect r) {
   icon_stroke(ctx);
   graphics_draw_circle(ctx, GPoint(cx, cy), radius);
 
-  // Latitude lines
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 2);
   for (int dy = -radius / 2; dy <= radius / 2; dy += radius / 2) {
-    int hw = (int)(radius * 0.87f);
+    int hw = radius * 7 / 8;
     graphics_draw_line(ctx, GPoint(cx - hw, cy + dy), GPoint(cx + hw, cy + dy));
   }
-  // Longitude
   graphics_draw_line(ctx, GPoint(cx, cy - radius + 2), GPoint(cx, cy + radius - 2));
 
-  // Small car on globe surface
   graphics_context_set_fill_color(ctx, COLOR_DARK);
   graphics_fill_rect(ctx, GRect(cx - 10, cy - radius / 3 - 4, 20, 8), 2, GCornersAll);
 }
 
+// On round watches, draw a white road strip with black top edge at screen bottom.
+// The circular hardware clip masks the ends automatically.
+#ifdef PBL_ROUND
+static void draw_road_strip(GContext *ctx, GRect bounds) {
+  int strip_h = 22;
+  int y = bounds.size.h - strip_h;
+  graphics_context_set_fill_color(ctx, COLOR_FG);
+  graphics_fill_rect(ctx, GRect(0, y, bounds.size.w, strip_h), 0, GCornerNone);
+  graphics_context_set_stroke_color(ctx, COLOR_DARK);
+  graphics_context_set_stroke_width(ctx, 3);
+  graphics_draw_line(ctx, GPoint(0, y), GPoint(bounds.size.w, y));
+}
+#endif
+
 // ── Text helper (round screen flow) ──────────────────────────────────────────
-// On round watches, enables text reflow around the circular screen edges.
-// Pass inset=0 to skip flow (e.g. single-line header text that fits within INSET_X).
 static void draw_text(GContext *ctx, const char *text, GFont font, GRect rect,
                       GTextOverflowMode overflow, GTextAlignment align, uint8_t inset) {
 #ifdef PBL_ROUND
@@ -271,30 +282,10 @@ static void draw_text(GContext *ctx, const char *text, GFont font, GRect rect,
   graphics_draw_text(ctx, text, font, rect, overflow, align, NULL);
 }
 
-// ── Header (no dark bar — white text on orange) ───────────────────────────────
-static void draw_header(GContext *ctx, GRect bounds, const char *page_label) {
-  char time_buf[8];
-  time_t now = time(NULL);
-  struct tm *t = localtime(&now);
-  strftime(time_buf, sizeof(time_buf), clock_is_24h_style() ? "%H:%M" : "%I:%M", t);
-  const char *time_str = (time_buf[0] == '0') ? time_buf + 1 : time_buf;
-
-  graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, time_str, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-            GRect(INSET_X, INSET_TOP, bounds.size.w / 2, 22),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
-  draw_text(ctx, page_label, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-            GRect(bounds.size.w / 2, INSET_TOP, bounds.size.w / 2 - INSET_X, 22),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentRight, 0);
-}
-
-// y position where content starts (below header)
-static int content_y(void) { return INSET_TOP + 24; }
-
-// Draw the big number + label beneath, matching Figma proportions
+// Helper: draw LECO number + label below it
 static void draw_big_stat(GContext *ctx, GRect bounds,
                           const char *number, const char *label) {
-  int y = content_y();
+  int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
 
   graphics_context_set_text_color(ctx, COLOR_FG);
@@ -302,15 +293,29 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
             GRect(INSET_X, y, w, 52),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 52, w, 50),
-            GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
+            GRect(INSET_X, y + 52, w, 30),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
+}
+
+// Helper: draw car icon at bottom of screen, with road strip on round watches
+static void draw_car_bottom(GContext *ctx, GRect bounds) {
+#ifdef PBL_ROUND
+  // Car bleeds off the right edge — circular clip handles masking
+  int bleed_w = bounds.size.w * 5 / 4;
+  int car_h   = 66;
+  int car_y   = bounds.size.h - car_h - 24;
+  draw_icon_car(ctx, GRect(bounds.size.w / 8, car_y, bleed_w, car_h));
+  draw_road_strip(ctx, bounds);
+#else
+  draw_icon_car(ctx, GRect(INSET_X, bounds.size.h - 62,
+                           bounds.size.w - INSET_X * 2, 58));
+#endif
 }
 
 // ── Page renderers ────────────────────────────────────────────────────────────
 
 static void draw_page_climate(GContext *ctx, GRect bounds) {
-  draw_header(ctx, bounds, "1/7");
-  int y = content_y();
+  int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
 
   graphics_context_set_text_color(ctx, COLOR_FG);
@@ -323,27 +328,24 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y + 52, w / 2, 30),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
 
-  // Temp bottom-left
   char temp_buf[16];
   if (s_state.use_metric) {
     int c = (s_state.outside_temp - 32) * 5 / 9;
-    snprintf(temp_buf, sizeof(temp_buf), "outside\n%d°C", c);
+    snprintf(temp_buf, sizeof(temp_buf), "out %d\xC2\xB0""C", c);
   } else {
-    snprintf(temp_buf, sizeof(temp_buf), "outside\n%d°F", s_state.outside_temp);
+    snprintf(temp_buf, sizeof(temp_buf), "out %d\xC2\xB0""F", s_state.outside_temp);
   }
   draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18),
-            GRect(INSET_X, bounds.size.h - 48, w / 2, 44),
-            GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
+            GRect(INSET_X, bounds.size.h - 44, w / 2, 40),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
 
-  // Climate icon bottom-right
   draw_icon_climate(ctx,
     GRect(bounds.size.w / 2 + 4, bounds.size.h - 54, w / 2 - 4, 48),
     s_state.climate_on);
 }
 
 static void draw_page_lock(GContext *ctx, GRect bounds) {
-  draw_header(ctx, bounds, "2/7");
-  int y = content_y();
+  int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
 
   graphics_context_set_text_color(ctx, COLOR_FG);
@@ -352,17 +354,15 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y, w, 52),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  // Lock icon centred in lower half
   int icon_y = y + 60;
   draw_icon_lock(ctx,
-    GRect(bounds.size.w / 2 - 32, icon_y, 64, bounds.size.h - icon_y - 8),
+    GRect(INSET_X, icon_y, bounds.size.w - INSET_X * 2, bounds.size.h - icon_y - 8),
     s_state.locked);
 }
 
 static void draw_page_charge_time(GContext *ctx, GRect bounds) {
-  draw_header(ctx, bounds, "3/7");
   if (!s_state.is_charging) {
-    int y = content_y();
+    int y = CONTENT_Y;
     int w = bounds.size.w - INSET_X * 2;
     graphics_context_set_text_color(ctx, COLOR_FG);
     draw_text(ctx, "NOT",
@@ -376,54 +376,47 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
   } else {
     char num[8];
     snprintf(num, sizeof(num), "%d", s_state.charge_min);
-    draw_big_stat(ctx, bounds, num, "minutes\nuntil full");
+    draw_big_stat(ctx, bounds, num, "min to full");
   }
-  // Charger icon bottom-right
   draw_icon_charger(ctx,
-    GRect(bounds.size.w - INSET_X - 56, bounds.size.h - 64, 52, 56));
+    GRect(bounds.size.w - INSET_X - 54, bounds.size.h - 64, 50, 56));
 }
 
 static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
-  draw_header(ctx, bounds, "4/7");
   char num[8];
   snprintf(num, sizeof(num), "%d%%", s_state.charge_pct);
   draw_big_stat(ctx, bounds, num, "charged");
-  // Car icon bottom
-  draw_icon_car(ctx,
-    GRect(INSET_X, bounds.size.h - 62, bounds.size.w - INSET_X * 2, 58));
+  draw_car_bottom(ctx, bounds);
 }
 
 static void draw_page_range(GContext *ctx, GRect bounds) {
-  draw_header(ctx, bounds, "5/7");
   char num[16];
   int val = s_state.use_metric
     ? s_state.range_km
-    : (int)(s_state.range_km * 0.621371f);
+    : (int)(s_state.range_km * 621 / 1000);
   snprintf(num, sizeof(num), "%d", val);
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometer\nrange" : "mile\nrange");
-  // Car icon bottom
-  draw_icon_car(ctx,
-    GRect(INSET_X, bounds.size.h - 62, bounds.size.w - INSET_X * 2, 58));
+    s_state.use_metric ? "km range" : "mi range");
+  draw_car_bottom(ctx, bounds);
 }
 
 static void draw_page_odo(GContext *ctx, GRect bounds) {
-  draw_header(ctx, bounds, "6/7");
   char num[16];
   int val = s_state.use_metric
     ? s_state.odo_km
-    : (int)(s_state.odo_km * 0.621371f);
+    : (int)(s_state.odo_km * 621 / 1000);
   snprintf(num, sizeof(num), "%d", val);
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven");
-  // Globe icon bottom-right
+    s_state.use_metric ? "km driven" : "mi driven");
+
+  int icon_sz = MIN(bounds.size.w - INSET_X * 2, 60);
   draw_icon_globe(ctx,
-    GRect(bounds.size.w / 2, bounds.size.h - 62, bounds.size.w / 2 - INSET_X, 56));
+    GRect(bounds.size.w / 2 - icon_sz / 2, bounds.size.h - icon_sz - 8,
+          icon_sz, icon_sz));
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
-  draw_header(ctx, bounds, "7/7");
-  int y = content_y();
+  int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, "current\nlocation",
@@ -434,7 +427,6 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             fonts_get_system_font(FONT_KEY_GOTHIC_18),
             GRect(INSET_X, y + 60, w, bounds.size.h - y - 68),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
-  // Hint
   draw_text(ctx, "press for actions",
             fonts_get_system_font(FONT_KEY_GOTHIC_14),
             GRect(INSET_X, bounds.size.h - 18, w, 16),
@@ -446,7 +438,6 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
 
-  // Orange background
   graphics_context_set_fill_color(ctx, COLOR_BG);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
@@ -551,13 +542,20 @@ static void open_action_menu(void) {
 
 // ── Button handlers ───────────────────────────────────────────────────────────
 
+static void update_page_indicator(void) {
+  snprintf(s_page_buf, sizeof(s_page_buf), "%d/%d", s_page + 1, PAGE_COUNT);
+  text_layer_set_text(s_page_label, s_page_buf);
+}
+
 static void up_click(ClickRecognizerRef recognizer, void *context) {
   s_page = (s_page - 1 + PAGE_COUNT) % PAGE_COUNT;
+  update_page_indicator();
   layer_mark_dirty(s_canvas);
 }
 
 static void down_click(ClickRecognizerRef recognizer, void *context) {
   s_page = (s_page + 1) % PAGE_COUNT;
+  update_page_indicator();
   layer_mark_dirty(s_canvas);
 }
 
@@ -593,14 +591,36 @@ static void click_config_provider(void *context) {
 static void window_load(Window *window) {
   Layer *root   = window_get_root_layer(window);
   GRect  bounds = layer_get_bounds(root);
+
+  // Full-screen canvas (drawn behind the status bar layer)
   s_canvas = layer_create(bounds);
   layer_set_update_proc(s_canvas, canvas_update_proc);
   layer_add_child(root, s_canvas);
+
+  // Native status bar — auto-updates time, orange bg, white fg, no separator
+  s_status_bar = status_bar_layer_create();
+  status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_FG);
+  status_bar_layer_set_separator_mode(s_status_bar, StatusBarLayerSeparatorModeNone);
+  layer_add_child(root, status_bar_layer_get_layer(s_status_bar));
+
+  // Page indicator overlaid on the right side of the status bar row
+  int lbl_w = 36;
+  s_page_label = text_layer_create(
+    GRect(bounds.size.w - lbl_w - 2, 0, lbl_w, STATUS_BAR_LAYER_HEIGHT));
+  text_layer_set_background_color(s_page_label, GColorClear);
+  text_layer_set_text_color(s_page_label, COLOR_FG);
+  text_layer_set_font(s_page_label, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+  text_layer_set_text_alignment(s_page_label, GTextAlignmentRight);
+  layer_add_child(root, text_layer_get_layer(s_page_label));
+
+  update_page_indicator();
   window_set_click_config_provider(window, click_config_provider);
 }
 
 static void window_unload(Window *window) {
   layer_destroy(s_canvas);
+  status_bar_layer_destroy(s_status_bar);
+  text_layer_destroy(s_page_label);
 }
 
 // ── App lifecycle ─────────────────────────────────────────────────────────────
