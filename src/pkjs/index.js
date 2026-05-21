@@ -208,6 +208,8 @@ function sendError() {
 // ── Command handlers ──────────────────────────────────────────────────────────
 function handleCmd(cmd) {
   if (cmd === CMD_REFRESH) {
+    getStoredCreds();
+    if (!s_username || !s_password) { sendMockData(); return; }
     fetchAndSend();
     return;
   }
@@ -236,11 +238,27 @@ function handleCmd(cmd) {
   });
 }
 
+// ── Mock data (shown when no credentials are configured) ──────────────────────
+function sendMockData() {
+  var msg = {};
+  msg[KEY_STATE_LOCKED]      = 1;
+  msg[KEY_STATE_CLIMATE]     = 0;
+  msg[KEY_STATE_IS_CHARGING] = 1;
+  msg[KEY_STATE_CHARGE_MIN]  = 25;
+  msg[KEY_STATE_CHARGE_PCT]  = 80;
+  msg[KEY_STATE_RANGE_KM]    = 180;
+  msg[KEY_STATE_ODO_KM]      = 12305;
+  msg[KEY_STATE_LOCATION]    = '136 S Ash St, Palatine IL';
+  msg[KEY_STATE_OUTSIDE_TEMP]= 60;
+  msg[KEY_SETTING_UNITS]     = 1;
+  Pebble.sendAppMessage(msg, function() {}, function() {});
+}
+
 // ── Pebble events ─────────────────────────────────────────────────────────────
 Pebble.addEventListener('ready', function() {
   getStoredCreds();
   if (!s_username || !s_password) {
-    Pebble.openURL('pebblejs://close');
+    sendMockData();
     return;
   }
   fetchAndSend();
