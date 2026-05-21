@@ -257,11 +257,14 @@ function sendMockData() {
 // ── Pebble events ─────────────────────────────────────────────────────────────
 Pebble.addEventListener('ready', function() {
   getStoredCreds();
-  if (!s_username || !s_password) {
-    sendMockData();
-    return;
-  }
-  fetchAndSend();
+  // Short delay lets the AppMessage channel fully open on both sides
+  setTimeout(function() {
+    if (!s_username || !s_password) {
+      sendMockData();
+      return;
+    }
+    fetchAndSend();
+  }, 500);
 });
 
 Pebble.addEventListener('appmessage', function(e) {
