@@ -432,15 +432,6 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
   fill_bg(ctx, bounds);
 
-  if (s_state.loading) {
-    graphics_context_set_text_color(ctx, COLOR_FG);
-    graphics_draw_text(ctx, "Loading...",
-                       fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-                       GRect(INSET_X, bounds.size.h / 2 - 16, bounds.size.w - INSET_X * 2, 32),
-                       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
-    return;
-  }
-
   if (s_state.error) {
     graphics_context_set_text_color(ctx, COLOR_FG);
     graphics_draw_text(ctx, "Error\nCheck phone",
