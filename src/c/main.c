@@ -502,8 +502,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
 #endif
       break;
     }
-    case PAGE_ODO:
-    case PAGE_LOCATION: {
+    case PAGE_ODO: {
 #if defined(PBL_PLATFORM_EMERY)
       int cw = w * 40 / 100;
 #elif defined(PBL_PLATFORM_CHALK)
@@ -816,7 +815,6 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GRect(INSET_X, div_y + 8, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 #endif
-  draw_globe(ctx, bounds);
 }
 
 // ── Canvas update ─────────────────────────────────────────────────────────────
