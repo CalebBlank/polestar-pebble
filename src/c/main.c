@@ -124,14 +124,16 @@ static void icon_stroke(GContext *ctx) {
 }
 
 // rot_angle: 0 = flat, TRIG_MAX_ANGLE*335/360 = 25° CCW (front/right tilts up).
+// wheel_r_override: >0 overrides default wheel radius (MAX(h/4,10)); 0 = use default.
 // Path points are centered around the body pivot so gpath_rotate_to works correctly.
-static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle) {
+static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle, int wheel_r_override) {
   int x = r.origin.x, y = r.origin.y, w = r.size.w, h = r.size.h;
-  int wheel_r = MAX(h / 4, 10);
+  int wheel_r = wheel_r_override > 0 ? wheel_r_override : MAX(h / 4, 10);
   int body_h  = h - wheel_r;
   // Pivot = center of car body rectangle
   int pcx = w / 2;
   int pcy = body_h / 2;
+  int body_y_off = h / 18;  // shift body down slightly so it sits lower between wheels
 
   GPoint pts[] = {
     {(int16_t)(  5*w/161 - pcx), (int16_t)(19*body_h/54 - pcy)},
@@ -155,7 +157,7 @@ static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle) {
   GPathInfo info = { .num_points = 17, .points = pts };
   GPath *path = gpath_create(&info);
   if (rot_angle != 0) gpath_rotate_to(path, rot_angle);
-  gpath_move_to(path, GPoint(x + pcx, y + pcy));
+  gpath_move_to(path, GPoint(x + pcx, y + pcy + body_y_off));
 
   icon_fill(ctx);   gpath_draw_filled(ctx, path);
   icon_stroke(ctx); gpath_draw_outline(ctx, path);
@@ -205,22 +207,24 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   int mx = port_x, my = ground_y; // control: directly below port at ground
   int ex = -4,     ey = ground_y; // end: off left edge at ground
 
-  graphics_context_set_stroke_color(ctx, COLOR_FG);
-  graphics_context_set_stroke_width(ctx, 4);
-  GPoint prev = GPoint(sx, sy);
-  for (int i = 1; i <= 8; i++) {
-    int t  = i, mt = 8 - i;
-    int px = (mt*mt*sx + 2*mt*t*mx + t*t*ex) / 64;
-    int py = (mt*mt*sy + 2*mt*t*my + t*t*ey) / 64;
-    graphics_draw_line(ctx, prev, GPoint(px, py));
-    prev = GPoint(px, py);
+  // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
+  for (int pass = 0; pass < 2; pass++) {
+    if (pass == 0) {
+      graphics_context_set_stroke_color(ctx, COLOR_DARK);
+      graphics_context_set_stroke_width(ctx, 6);
+    } else {
+      graphics_context_set_stroke_color(ctx, COLOR_FG);
+      graphics_context_set_stroke_width(ctx, 4);
+    }
+    GPoint prev = GPoint(sx, sy);
+    for (int i = 1; i <= 8; i++) {
+      int t = i, mt = 8 - i;
+      int px = (mt*mt*sx + 2*mt*t*mx + t*t*ex) / 64;
+      int py = (mt*mt*sy + 2*mt*t*my + t*t*ey) / 64;
+      graphics_draw_line(ctx, prev, GPoint(px, py));
+      prev = GPoint(px, py);
+    }
   }
-  // Connector plug at port
-  graphics_context_set_fill_color(ctx, COLOR_FG);
-  graphics_fill_circle(ctx, GPoint(port_x, port_y), 6);
-  graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 2);
-  graphics_draw_circle(ctx, GPoint(port_x, port_y), 6);
 }
 
 static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
@@ -370,7 +374,7 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
   #undef GP
 
   // Car at 25° LEFT from top of globe, tilted -25° CCW (front/right tilts up)
-  int car_w = w * 32 / 100;   // ~83px at 260, ~64px at 200
+  int car_w = w * 38 / 100;   // slightly larger than other pages
   int car_h = car_w * 72 / 161;
   int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
   int32_t rot = TRIG_MAX_ANGLE * 335 / 360;  // -25° CCW
@@ -382,7 +386,7 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
   // Place so wheel-center row (body_h from rect top) sits AT surface point
   draw_icon_car(ctx,
     GRect(surf_x - car_w / 2, surf_y - body_h, car_w, car_h),
-    rot);
+    rot, MAX(car_h / 6, 8));
 }
 
 // On round watches, draw a white road strip with black top edge at screen bottom.
@@ -423,11 +427,11 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int lh = large ? 80 : 68;
 
   graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49),
-            GRect(INSET_X, y, w, 60),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, INSET_X);
+  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
+            GRect(INSET_X, y, w, 56),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, lf,
-            GRect(INSET_X, y + 60, w, lh),
+            GRect(INSET_X, y + 40, w, lh),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
 }
 
@@ -438,13 +442,13 @@ static void draw_car_bottom(GContext *ctx, GRect bounds) {
   int car_h = car_w * 72 / 161;
   int car_x = bounds.size.w / 2 - car_w / 2;
   int car_y = bounds.size.h - 22 - car_h;
-  draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
+  draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
   draw_road_strip(ctx, bounds);
 #else
   int car_w = MIN(bounds.size.w - INSET_X * 2, 150);
   int car_h = car_w * 72 / 161;
   int car_x = bounds.size.w / 2 - car_w / 2;
-  draw_icon_car(ctx, GRect(car_x, bounds.size.h - car_h - 2, car_w, car_h), 0);
+  draw_icon_car(ctx, GRect(car_x, bounds.size.h - car_h - 2, car_w, car_h), 0, 0);
 #endif
 }
 
@@ -525,7 +529,7 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
     int car_h = car_w * 72 / 161;
     int car_x = 35 - 8 * car_w / 161;
     int car_y = bounds.size.h - 22 - car_h;
-    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
+    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
     draw_road_strip(ctx, bounds);
     draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w, bounds.size.h);
   }
@@ -535,7 +539,7 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
     int car_h = car_w * 72 / 161;
     int car_x = 35 - 8 * car_w / 161;
     int car_y = bounds.size.h - car_h - 2;
-    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
+    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
     draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w, bounds.size.h);
   }
 #endif
@@ -561,11 +565,11 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   char num[8];
   snprintf(num, sizeof(num), "%d", s_state.charge_pct);
   draw_big_stat(ctx, bounds, num, "charged", true);
-  // ROBOTO_BOLD_SUBSET_49 digits are ~30px wide each; draw % glyph after the number
+  // LECO_42_NUMBERS digits are ~26px wide; % glyph bottom aligned with number bottom (~y+34)
   int digits   = s_state.charge_pct >= 100 ? 3 : (s_state.charge_pct >= 10 ? 2 : 1);
-  int glyph_sz = 30;
+  int glyph_sz = 18;
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * 30 + 4, CONTENT_Y + 6),
+    GPoint(INSET_X + digits * 26 + 4, CONTENT_Y + 16),
     glyph_sz);
   draw_car_bottom(ctx, bounds);
 }
@@ -588,7 +592,7 @@ static void draw_page_range(GContext *ctx, GRect bounds) {
 #else
     int car_y = bounds.size.h - car_h - 2;
 #endif
-    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
+    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
   }
 #ifdef PBL_ROUND
   draw_road_strip(ctx, bounds);
@@ -616,11 +620,11 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y, w, 80),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
   draw_text(ctx, "current location",
-            fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-            GRect(INSET_X, y + 80, w, 24),
+            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+            GRect(INSET_X, y + 80, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
 
-  int div_y = y + 80 + 24 + 4;
+  int div_y = y + 80 + 36 + 4;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
   graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
