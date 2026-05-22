@@ -99,6 +99,10 @@ static TextLayer        *s_page_label;
 static char              s_page_buf[8];
 static SimpleMenuLayer  *s_action_menu_layer;
 static Window           *s_action_window;
+static int               s_action_pending  = -1;
+static bool              s_animating       = false;
+static Layer            *s_anim_layer      = NULL;
+static int               s_anim_from_page  = 0;
 
 // ── Icon drawing ──────────────────────────────────────────────────────────────
 
@@ -107,31 +111,40 @@ static void icon_fill(GContext *ctx) {
 }
 static void icon_stroke(GContext *ctx) {
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 3);
+  graphics_context_set_stroke_width(ctx, 4);
 }
 
 static void draw_icon_car(GContext *ctx, GRect r) {
   int x = r.origin.x, y = r.origin.y, w = r.size.w, h = r.size.h;
 
-  // Body polygon from car_body.svg (161×54 viewBox), roof corners chamfered.
-  // Wheels take bottom 25% of height; body fills the rest.
+  // Body polygon from car_body.svg (161×54). Roof corners use 3-step bezier
+  // approximation so they appear genuinely curved, not just chamfered.
+  // Wheels take bottom 25% of height.
   int wheel_r = MAX(h / 4, 10);
   int body_h  = h - wheel_r;
 
   GPoint pts[] = {
-    {(int16_t)(x +   5*w/161), (int16_t)(y + 19*body_h/54)},
-    {(int16_t)(x +   3*w/161), (int16_t)(y + 43*body_h/54)},
-    {(int16_t)(x +  30*w/161), (int16_t)(y + 51*body_h/54)},
-    {(int16_t)(x + 136*w/161), (int16_t)(y + 51*body_h/54)},
-    {(int16_t)(x + 158*w/161), (int16_t)(y + 48*body_h/54)},
-    {(int16_t)(x + 156*w/161), (int16_t)(y + 27*body_h/54)},
-    {(int16_t)(x + 119*w/161), (int16_t)(y + 19*body_h/54)},
-    {(int16_t)(x +  96*w/161), (int16_t)(y +  7*body_h/54)},  // chamfer rear roof corner
-    {(int16_t)(x +  81*w/161), (int16_t)(y +  3*body_h/54)},
-    {(int16_t)(x +  52*w/161), (int16_t)(y +  3*body_h/54)},  // chamfer front roof corner
-    {(int16_t)(x +  37*w/161), (int16_t)(y +  6*body_h/54)},
+    {(int16_t)(x +   5*w/161), (int16_t)(y + 19*body_h/54)},  // A hood
+    {(int16_t)(x +   3*w/161), (int16_t)(y + 43*body_h/54)},  // B bumper
+    {(int16_t)(x +  30*w/161), (int16_t)(y + 51*body_h/54)},  // C undercarriage front
+    {(int16_t)(x + 136*w/161), (int16_t)(y + 51*body_h/54)},  // D undercarriage rear
+    {(int16_t)(x + 158*w/161), (int16_t)(y + 48*body_h/54)},  // E rear bumper
+    {(int16_t)(x + 156*w/161), (int16_t)(y + 27*body_h/54)},  // F rear trunk
+    {(int16_t)(x + 119*w/161), (int16_t)(y + 19*body_h/54)},  // G rear roofline
+    // Bezier curve for rear roof corner (control pt was sharp corner at 89,3)
+    {(int16_t)(x +  96*w/161), (int16_t)(y +  7*body_h/54)},  // H→G approach
+    {(int16_t)(x +  92*w/161), (int16_t)(y +  5*body_h/54)},  // bezier t=0.25
+    {(int16_t)(x +  89*w/161), (int16_t)(y +  4*body_h/54)},  // bezier t=0.50
+    {(int16_t)(x +  85*w/161), (int16_t)(y +  3*body_h/54)},  // bezier t=0.75
+    {(int16_t)(x +  81*w/161), (int16_t)(y +  3*body_h/54)},  // H→flat roof
+    // Bezier curve for front roof corner (control pt was sharp corner at 44,3)
+    {(int16_t)(x +  52*w/161), (int16_t)(y +  3*body_h/54)},  // I→flat roof
+    {(int16_t)(x +  48*w/161), (int16_t)(y +  3*body_h/54)},  // bezier t=0.25
+    {(int16_t)(x +  44*w/161), (int16_t)(y +  4*body_h/54)},  // bezier t=0.50
+    {(int16_t)(x +  41*w/161), (int16_t)(y +  5*body_h/54)},  // bezier t=0.75
+    {(int16_t)(x +  37*w/161), (int16_t)(y +  6*body_h/54)},  // I→windshield
   };
-  GPathInfo info = { .num_points = 11, .points = pts };
+  GPathInfo info = { .num_points = 17, .points = pts };
   GPath *path = gpath_create(&info);
 
   icon_fill(ctx);
@@ -140,7 +153,7 @@ static void draw_icon_car(GContext *ctx, GRect r) {
   gpath_draw_outline(ctx, path);
   gpath_destroy(path);
 
-  // Wheels: front axle at ~22% from left, rear at ~78%, matching Polestar proportions
+  // Wheels: front 22%, rear 78% — no hub dots
   int wheel_y  = y + body_h;
   int front_wx = x + 35  * w / 161;
   int rear_wx  = x + 126 * w / 161;
@@ -151,22 +164,18 @@ static void draw_icon_car(GContext *ctx, GRect r) {
   icon_stroke(ctx);
   graphics_draw_circle(ctx, GPoint(front_wx, wheel_y), wheel_r);
   graphics_draw_circle(ctx, GPoint(rear_wx,  wheel_y), wheel_r);
-
-  graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_circle(ctx, GPoint(front_wx, wheel_y), 3);
-  graphics_fill_circle(ctx, GPoint(rear_wx,  wheel_y), 3);
 }
 
-// Draw a charging cable plug: circle connector + horizontal cable stub to the right.
+// Draw a charging cable entering from left edge to the front nose of the car.
 static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
-                                int car_w, int car_h, int screen_w) {
+                                int car_w, int car_h) {
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
-  int port_x  = car_x + 143 * car_w / 161;  // rear upper area (charge port)
-  int port_y  = car_y + 28 * body_h / 54;
+  int port_x  = car_x + 8  * car_w / 161;  // front nose (Polestar 2 charge port)
+  int port_y  = car_y + 32 * body_h / 54;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 5);
-  graphics_draw_line(ctx, GPoint(screen_w + 2, port_y), GPoint(port_x, port_y));
+  graphics_draw_line(ctx, GPoint(-2, port_y), GPoint(port_x, port_y));
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_circle(ctx, GPoint(port_x, port_y), 6);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
@@ -197,12 +206,18 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int arc_cx = locked ? cx : cx + bw * 2;
   int arc_cy = by - arm_h;
 
-  // Shackle arms (filled rects, white, extend from arc center down to body top)
+  // Shackle arms (filled rects with black outline, extend from arc center down to body top)
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0, GCornerNone);
   graphics_fill_rect(ctx,
     GRect(arc_cx + arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0, GCornerNone);
+  graphics_context_set_stroke_color(ctx, COLOR_DARK);
+  graphics_context_set_stroke_width(ctx, 3);
+  graphics_draw_round_rect(ctx,
+    GRect(arc_cx - arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0);
+  graphics_draw_round_rect(ctx,
+    GRect(arc_cx + arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0);
 
   // Shackle arc: top semicircle drawn as two 90° quarters to avoid wrap-around issues.
   // 270°→360° = left quarter (9→12 o'clock), 0°→90° = right quarter (12→3 o'clock).
@@ -237,17 +252,19 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   int h = bounds.size.h;
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 2);
+  graphics_context_set_stroke_width(ctx, 3);
 
   {
     GPoint pts[] = {
       {-5,             h},
-      {w*27/100,   h-70},  // chamfer left of peak
-      {w*29/100,   h-76},  // peak
-      {w*31/100,   h-70},  // chamfer right of peak
+      {w*27/100,   h-70},
+      {w*28/100,   h-72},
+      {w*29/100,   h-73},
+      {w*30/100,   h-72},
+      {w*31/100,   h-70},
       {w*62/100,       h},
     };
-    GPathInfo info = { .num_points = 5, .points = pts };
+    GPathInfo info = { .num_points = 7, .points = pts };
     GPath *path = gpath_create(&info);
     gpath_draw_filled(ctx, path);
     gpath_draw_outline(ctx, path);
@@ -256,12 +273,14 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   {
     GPoint pts[] = {
       {w*33/100,       h},
-      {w*68/100,   h-87},  // chamfer left of peak
-      {w*70/100,   h-94},  // peak
-      {w*72/100,   h-87},  // chamfer right of peak
+      {w*68/100,   h-87},
+      {w*69/100,   h-90},
+      {w*70/100,   h-91},
+      {w*71/100,   h-90},
+      {w*72/100,   h-87},
       {w+5,            h},
     };
-    GPathInfo info = { .num_points = 5, .points = pts };
+    GPathInfo info = { .num_points = 7, .points = pts };
     GPath *path = gpath_create(&info);
     gpath_draw_filled(ctx, path);
     gpath_draw_outline(ctx, path);
@@ -278,7 +297,7 @@ static void draw_hills_and_car(GContext *ctx, GRect bounds) {
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_circle(ctx, hill_center, hill_r);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 2);
+  graphics_context_set_stroke_width(ctx, 3);
   graphics_draw_circle(ctx, hill_center, hill_r);
   int car_h = 50, car_w = 96;
   int dome_top = h - 80;
@@ -421,19 +440,19 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
 #ifdef PBL_ROUND
   {
     int car_w = 160, car_h = 64;
-    int car_x = bounds.size.w / 2 - car_w / 2;
+    int car_x = bounds.size.w / 2;
     int car_y = bounds.size.h - car_h - 14;
     draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h));
     draw_road_strip(ctx, bounds);
-    draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w);
+    draw_charging_cable(ctx, car_x, car_y, car_w, car_h);
   }
 #else
   {
     int car_w = MIN(bounds.size.w - INSET_X * 2, 150), car_h = 62;
-    int car_x = bounds.size.w / 2 - car_w / 2;
+    int car_x = bounds.size.w * 40 / 100;
     int car_y = bounds.size.h - car_h - 6;
     draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h));
-    draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w);
+    draw_charging_cable(ctx, car_x, car_y, car_w, car_h);
   }
 #endif
 }
@@ -518,11 +537,12 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
 
 static void canvas_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
+  int   page   = (layer == s_anim_layer) ? s_anim_from_page : s_page;
 
   graphics_context_set_fill_color(ctx, COLOR_BG);
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
-  if (s_state.error) {
+  if (s_state.error && layer != s_anim_layer) {
     graphics_context_set_text_color(ctx, COLOR_FG);
     draw_text(ctx, "Error\nCheck phone",
               fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
@@ -531,7 +551,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     return;
   }
 
-  switch (s_page) {
+  switch (page) {
     case PAGE_CLIMATE:     draw_page_climate(ctx, bounds);     break;
     case PAGE_LOCK:        draw_page_lock(ctx, bounds);        break;
     case PAGE_CHARGE_TIME: draw_page_charge_time(ctx, bounds); break;
@@ -582,16 +602,14 @@ static void inbox_dropped(AppMessageResult reason, void *context) {
 
 // ── Location action menu ──────────────────────────────────────────────────────
 
-static void action_menu_select_cb(int index, void *context) {
-  switch (s_page) {
+static void do_action_cb(void *data) {
+  switch (s_action_pending) {
     case PAGE_CLIMATE:
       s_state.climate_on = !s_state.climate_on;
-      layer_mark_dirty(s_canvas);
       send_cmd(CMD_TOGGLE_CLIMATE);
       break;
     case PAGE_LOCK:
       s_state.locked = !s_state.locked;
-      layer_mark_dirty(s_canvas);
       send_cmd(CMD_TOGGLE_LOCK);
       break;
     case PAGE_LOCATION:
@@ -601,7 +619,13 @@ static void action_menu_select_cb(int index, void *context) {
     default:
       break;
   }
+  s_action_pending = -1;
   window_stack_pop(true);
+}
+
+static void action_menu_select_cb(int index, void *context) {
+  s_action_pending = s_page;
+  app_timer_register(50, do_action_cb, NULL);
 }
 
 static void action_window_load(Window *window) {
@@ -651,23 +675,68 @@ static void open_action_menu(void) {
   window_stack_push(s_action_window, true);
 }
 
-// ── Button handlers ───────────────────────────────────────────────────────────
+// ── Page transition animation ─────────────────────────────────────────────────
 
 static void update_page_indicator(void) {
   snprintf(s_page_buf, sizeof(s_page_buf), "%d/%d", s_page + 1, PAGE_COUNT);
   text_layer_set_text(s_page_label, s_page_buf);
 }
 
-static void up_click(ClickRecognizerRef recognizer, void *context) {
-  s_page = (s_page - 1 + PAGE_COUNT) % PAGE_COUNT;
+static void transition_stopped(Animation *anim, bool finished, void *context) {
+  s_animating = false;
+  if (s_anim_layer) {
+    layer_remove_from_parent(s_anim_layer);
+    layer_destroy(s_anim_layer);
+    s_anim_layer = NULL;
+  }
+  GRect r = layer_get_bounds(window_get_root_layer(s_window));
+  layer_set_frame(s_canvas, r);
+}
+
+static void navigate(int dir) {
+  if (s_animating) return;
+  Layer *root   = window_get_root_layer(s_window);
+  GRect  bounds = layer_get_bounds(root);
+  int    w = bounds.size.w, h = bounds.size.h;
+
+  s_animating      = true;
+  s_anim_from_page = s_page;
+  s_page           = (s_page + dir + PAGE_COUNT) % PAGE_COUNT;
   update_page_indicator();
+
+  // Old page layer: starts in place, slides out in -dir direction
+  s_anim_layer = layer_create(GRect(0, 0, w, h));
+  layer_set_update_proc(s_anim_layer, canvas_update_proc);
+  layer_insert_below_sibling(s_anim_layer, s_canvas);
+
+  GRect canvas_start = GRect(dir * w, 0, w, h);
+  GRect canvas_end   = GRect(0, 0, w, h);
+  layer_set_frame(s_canvas, canvas_start);
   layer_mark_dirty(s_canvas);
+
+  GRect anim_start = GRect(0, 0, w, h);
+  GRect anim_end   = GRect(-dir * w, 0, w, h);
+
+  PropertyAnimation *pa_in  = property_animation_create_layer_frame(s_canvas, &canvas_start, &canvas_end);
+  PropertyAnimation *pa_out = property_animation_create_layer_frame(s_anim_layer, &anim_start, &anim_end);
+  animation_set_duration((Animation*)pa_in,  280);
+  animation_set_curve((Animation*)pa_in,  AnimationCurveEaseInOut);
+  animation_set_duration((Animation*)pa_out, 280);
+  animation_set_curve((Animation*)pa_out, AnimationCurveEaseInOut);
+
+  Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, NULL);
+  animation_set_handlers(spawn, (AnimationHandlers){ .stopped = transition_stopped }, NULL);
+  animation_schedule(spawn);
+}
+
+// ── Button handlers ───────────────────────────────────────────────────────────
+
+static void up_click(ClickRecognizerRef recognizer, void *context) {
+  navigate(-1);
 }
 
 static void down_click(ClickRecognizerRef recognizer, void *context) {
-  s_page = (s_page + 1) % PAGE_COUNT;
-  update_page_indicator();
-  layer_mark_dirty(s_canvas);
+  navigate(1);
 }
 
 static void select_click(ClickRecognizerRef recognizer, void *context) {
