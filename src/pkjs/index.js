@@ -17,6 +17,7 @@ var CMD_REFRESH          = 1;
 var CMD_TOGGLE_LOCK      = 2;
 var CMD_TOGGLE_CLIMATE   = 3;
 var CMD_HONK             = 4;
+var CMD_NAVIGATE         = 5;
 
 // ── Polestar API ──────────────────────────────────────────────────────────────
 // Unofficial API: https://github.com/kildahldev/unofficial-polestar-api
@@ -27,6 +28,8 @@ var s_token = null;
 var s_vehicle_id = null;
 var s_username = null;
 var s_password = null;
+var s_car_lat = 0;
+var s_car_lng = 0;
 
 function getStoredCreds() {
   var raw = localStorage.getItem('polestar_creds');
@@ -166,6 +169,8 @@ function fetchAndSend() {
         var odo_km      = Math.round((odoData.odometerMeters || 0) / 1000);
         var lat         = locData.latitude || 0;
         var lon         = locData.longitude || 0;
+        s_car_lat = lat;
+        s_car_lng = lon;
 
         function sendAll(location_str) {
           var msg = {};
@@ -230,9 +235,11 @@ function handleCmd(cmd) {
           if (!err) fetchAndSend();
         });
       } else if (cmd === CMD_HONK) {
-        apiPost('vehicles/' + vid + '/honk-blink', null, function() {
-          // fire and forget — no state update needed
-        });
+        apiPost('vehicles/' + vid + '/honk-blink', null, function() {});
+      } else if (cmd === CMD_NAVIGATE) {
+        if (s_car_lat !== 0 || s_car_lng !== 0) {
+          Pebble.openURL('https://maps.google.com/?q=' + s_car_lat + ',' + s_car_lng);
+        }
       }
     });
   });
