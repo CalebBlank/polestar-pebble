@@ -379,7 +379,7 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
 #elif defined(PBL_PLATFORM_CHALK)
   int car_w = w * 35 / 100;
 #else
-  int car_w = w * 42 / 100;
+  int car_w = w * 36 / 100;
 #endif
   int car_h = car_w * 72 / 161;
   int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
@@ -600,14 +600,14 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   int digit_w  = 40;
   int glyph_sz = 24;
-  int glyph_y  = CONTENT_Y + 20;
+  int glyph_y  = CONTENT_Y + 16;
 #else
   int digit_w  = 30;
   int glyph_sz = 18;
-  int glyph_y  = CONTENT_Y + 16;
+  int glyph_y  = CONTENT_Y + 12;
 #endif
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * digit_w + 4, glyph_y),
+    GPoint(INSET_X + digits * digit_w + 1, glyph_y),
     glyph_sz);
   draw_car_bottom(ctx, bounds);
 }
