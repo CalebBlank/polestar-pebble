@@ -206,6 +206,11 @@ function fetchAndSend() {
           // outside temp comes from climate data if available
           Pebble.sendAppMessage(msg, function() {}, function() {});
           sendDistance();
+          if (is_charging && charge_min > 0) {
+            pushChargePin(charge_min, charge_pct);
+          } else {
+            deleteChargePin();
+          }
         }
 
         if (lat && lon) {
@@ -284,6 +289,55 @@ function sendMockData() {
   msg[KEY_SETTING_UNITS]     = 1;
   msg[KEY_STATE_DISTANCE_M]  = 2200;
   Pebble.sendAppMessage(msg, function() {}, function() {});
+}
+
+// ── Timeline pins ─────────────────────────────────────────────────────────────
+var TIMELINE_API = 'https://timeline-api.rebble.io/v1/user/pins/';
+var CHARGE_PIN_ID = 'polestar-charge-complete';
+
+function pushChargePin(charge_min, charge_pct) {
+  Pebble.getTimelineToken(function(token) {
+    var done = new Date(Date.now() + charge_min * 60 * 1000);
+    var pin = {
+      id: CHARGE_PIN_ID,
+      time: done.toISOString(),
+      duration: 1,
+      layout: {
+        type: 'genericPin',
+        title: 'Polestar fully charged',
+        subtitle: charge_pct + '% battery',
+        tinyIcon: 'system://images/GENERIC_CONFIRMATION'
+      },
+      reminders: [
+        {
+          time: new Date(done.getTime() - 10 * 60 * 1000).toISOString(),
+          layout: {
+            type: 'genericReminder',
+            title: 'Polestar charges in 10 min'
+          }
+        }
+      ]
+    };
+    var xhr = new XMLHttpRequest();
+    xhr.open('PUT', TIMELINE_API + CHARGE_PIN_ID, true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.setRequestHeader('X-User-Token', token);
+    xhr.onload = function() {
+      console.log('Timeline pin: ' + xhr.status);
+    };
+    xhr.send(JSON.stringify(pin));
+  }, function(err) {
+    console.log('Timeline token error: ' + err);
+  });
+}
+
+function deleteChargePin() {
+  Pebble.getTimelineToken(function(token) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('DELETE', TIMELINE_API + CHARGE_PIN_ID, true);
+    xhr.setRequestHeader('X-User-Token', token);
+    xhr.send();
+  }, function() {});
 }
 
 // ── Pebble events ─────────────────────────────────────────────────────────────
