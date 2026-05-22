@@ -1,3 +1,6 @@
+var Clay = require('./clay');
+var clay;
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 var KEY_CMD              = 0;
 var KEY_STATE_LOCKED     = 1;
@@ -239,6 +242,13 @@ function sendError() {
 
 // ── Command handlers ──────────────────────────────────────────────────────────
 function handleCmd(cmd) {
+  if (cmd === CMD_NAVIGATE) {
+    if (s_car_lat !== 0 || s_car_lng !== 0) {
+      Pebble.openURL('https://maps.google.com/?q=' + s_car_lat + ',' + s_car_lng);
+    }
+    return;
+  }
+
   if (cmd === CMD_REFRESH) {
     getStoredCreds();
     if (!s_username || !s_password) { sendMockData(); return; }
@@ -253,7 +263,6 @@ function handleCmd(cmd) {
       if (idErr) { sendError(); return; }
 
       if (cmd === CMD_TOGGLE_LOCK) {
-        // POST lock or unlock based on last known state
         apiPost('vehicles/' + vid + '/lock', null, function(err) {
           if (!err) fetchAndSend();
         });
@@ -263,10 +272,6 @@ function handleCmd(cmd) {
         });
       } else if (cmd === CMD_HONK) {
         apiPost('vehicles/' + vid + '/honk-blink', null, function() {});
-      } else if (cmd === CMD_NAVIGATE) {
-        if (s_car_lat !== 0 || s_car_lng !== 0) {
-          Pebble.openURL('https://maps.google.com/?q=' + s_car_lat + ',' + s_car_lng);
-        }
       }
     });
   });
@@ -274,6 +279,8 @@ function handleCmd(cmd) {
 
 // ── Mock data (shown when no credentials are configured) ──────────────────────
 function sendMockData() {
+  s_car_lat = 42.1148;
+  s_car_lng = -88.0039;
   var msg = {};
   msg[KEY_STATE_LOCKED]      = 1;
   msg[KEY_STATE_CLIMATE]     = 0;
@@ -362,81 +369,71 @@ Pebble.addEventListener('appmessage', function(e) {
   }
 });
 
-var CONFIG_HTML = [
-  '<!DOCTYPE html><html lang="en"><head>',
-  '<meta charset="UTF-8"/>',
-  '<meta name="viewport" content="width=device-width,initial-scale=1.0"/>',
-  '<title>Polestar</title>',
-  '<style>',
-  '*{box-sizing:border-box;margin:0;padding:0}',
-  'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#111;color:#fff;padding:24px 16px 40px}',
-  'h1{font-size:22px;font-weight:700;margin-bottom:6px;color:#F5820A}',
-  'p.sub{font-size:13px;color:#888;margin-bottom:28px}',
-  '.section{background:#1e1e1e;border-radius:12px;padding:16px;margin-bottom:16px}',
-  '.section h2{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#888;margin-bottom:12px}',
-  'label{display:block;font-size:15px;margin-bottom:4px;color:#ccc}',
-  'input[type=email],input[type=password]{width:100%;padding:10px 12px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#fff;font-size:16px;margin-bottom:14px;outline:none}',
-  'input:focus{border-color:#F5820A}',
-  '.row{display:flex;justify-content:space-between;align-items:center;padding:6px 0}',
-  '.row span{font-size:15px}',
-  'input[type=checkbox]{width:42px;height:24px;accent-color:#F5820A;cursor:pointer}',
-  'button{width:100%;padding:14px;background:#F5820A;color:#fff;border:none;border-radius:12px;font-size:17px;font-weight:700;cursor:pointer;margin-top:8px}',
-  'button:active{background:#d46e08}',
-  '.err{color:#ff5555;font-size:13px;margin-top:6px;display:none}',
-  '</style></head><body>',
-  '<h1>Polestar</h1>',
-  '<p class="sub">Connect your Polestar account to your watch.</p>',
-  '<div class="section"><h2>Account</h2>',
-  '<label for="e">Polestar email</label>',
-  '<input type="email" id="e" placeholder="you@example.com"/>',
-  '<label for="p">Password</label>',
-  '<input type="password" id="p" placeholder="••••••••"/>',
-  '<div class="err" id="err">Email and password are required.</div>',
-  '</div>',
-  '<div class="section"><h2>Units</h2>',
-  '<div class="row"><span>Use metric (km, °C)</span>',
-  '<input type="checkbox" id="m" checked/></div></div>',
-  '<div class="section"><h2>Display</h2>',
-  '<div class="row"><span>Black text (light mode)</span>',
-  '<input type="checkbox" id="lt"/></div></div>',
-  '<button onclick="save()">Save to Watch</button>',
-  '<script>',
-  'try{var s=JSON.parse(localStorage.getItem("polestar_creds")||"{}");',
-  'if(s.username)document.getElementById("e").value=s.username;',
-  'if(s.password)document.getElementById("p").value=s.password;}catch(ex){}',
-  'if(localStorage.getItem("use_metric")==="false")document.getElementById("m").checked=false;',
-  'if(localStorage.getItem("light_text")==="true")document.getElementById("lt").checked=true;',
-  'function save(){',
-  'var e=document.getElementById("e").value.trim(),',
-  'p=document.getElementById("p").value,',
-  'm=document.getElementById("m").checked,',
-  'lt=document.getElementById("lt").checked,',
-  'err=document.getElementById("err");',
-  'if(!e||!p){err.style.display="block";return;}',
-  'err.style.display="none";',
-  'localStorage.setItem("polestar_creds",JSON.stringify({username:e,password:p}));',
-  'localStorage.setItem("use_metric",m?"true":"false");',
-  'localStorage.setItem("light_text",lt?"true":"false");',
-  'location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({metric:m,lightText:lt}));}',
-  '<\/script></body></html>'
-].join('');
+// ── Clay configuration ────────────────────────────────────────────────────────
+// Builds the Clay config dynamically so saved credentials/settings are pre-filled.
+function buildClayConfig() {
+  var creds = {};
+  try { creds = JSON.parse(localStorage.getItem('polestar_creds') || '{}'); } catch(e2) {}
+  var metric = localStorage.getItem('use_metric') !== 'false';
+  var light  = localStorage.getItem('light_text') === 'true';
+  return [
+    { 'type': 'heading', 'defaultValue': 'Polestar' },
+    { 'type': 'section', 'items': [
+      { 'type': 'heading', 'defaultValue': 'Account' },
+      { 'type': 'input', 'id': 'email', 'messageKey': null,
+        'label': 'Polestar email', 'defaultValue': creds.username || '',
+        'attributes': { 'type': 'email', 'placeholder': 'you@example.com' } },
+      { 'type': 'input', 'id': 'password', 'messageKey': null,
+        'label': 'Password', 'defaultValue': creds.password || '',
+        'attributes': { 'type': 'password' } }
+    ]},
+    { 'type': 'section', 'items': [
+      { 'type': 'heading', 'defaultValue': 'Units' },
+      { 'type': 'toggle', 'messageKey': 'SETTING_UNITS',
+        'label': 'Metric (km, °C)', 'defaultValue': metric }
+    ]},
+    { 'type': 'section', 'items': [
+      { 'type': 'heading', 'defaultValue': 'Display' },
+      { 'type': 'toggle', 'messageKey': 'SETTING_LIGHT_TEXT',
+        'label': 'Black text (light mode)', 'defaultValue': light }
+    ]}
+  ];
+}
 
 Pebble.addEventListener('showConfiguration', function() {
-  Pebble.openURL('data:text/html,' + encodeURIComponent(CONFIG_HTML));
+  clay = new Clay(buildClayConfig(), null, { autoHandleEvents: false });
+  Pebble.openURL(clay.generateUrl());
 });
 
 Pebble.addEventListener('webviewclosed', function(e) {
-  if (e.response) {
-    try {
-      var data = JSON.parse(decodeURIComponent(e.response));
-      var use_metric = data.metric !== false ? 1 : 0;
-      var light_text = data.lightText ? 1 : 0;
-      localStorage.setItem('use_metric', use_metric ? 'true' : 'false');
-      localStorage.setItem('light_text', light_text ? 'true' : 'false');
-      var msg = {};
-      msg[KEY_SETTING_UNITS] = use_metric;
-      msg[KEY_SETTING_LIGHT_TEXT] = light_text;
-      Pebble.sendAppMessage(msg, function() {}, function() {});
-    } catch (err) {}
+  if (!e || !e.response) return;
+  try {
+    var settings = clay.getSettings(e.response);
+
+    // Credentials: Clay fields with messageKey=null are keyed by id
+    var email    = settings.email    ? String(settings.email.value    || '').trim() : '';
+    var password = settings.password ? String(settings.password.value || '')         : '';
+    if (email || password) {
+      var existing = {};
+      try { existing = JSON.parse(localStorage.getItem('polestar_creds') || '{}'); } catch(e3) {}
+      if (email)    existing.username = email;
+      if (password) existing.password = password;
+      localStorage.setItem('polestar_creds', JSON.stringify(existing));
+      getStoredCreds();
+    }
+
+    // Settings: sent to watch automatically by Clay (via messageKey mapping),
+    // but also persist locally for re-injection at next showConfiguration.
+    var metric = settings.SETTING_UNITS      ? !!settings.SETTING_UNITS.value      : true;
+    var light  = settings.SETTING_LIGHT_TEXT ? !!settings.SETTING_LIGHT_TEXT.value : false;
+    localStorage.setItem('use_metric', metric ? 'true' : 'false');
+    localStorage.setItem('light_text', light  ? 'true' : 'false');
+
+    var msg = {};
+    msg[KEY_SETTING_UNITS]     = metric ? 1 : 0;
+    msg[KEY_SETTING_LIGHT_TEXT] = light  ? 1 : 0;
+    Pebble.sendAppMessage(msg, function() {}, function() {});
+  } catch(e4) {
+    console.log('webviewclosed error: ' + e4);
   }
 });

@@ -325,13 +325,13 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
 
   {
     GPoint pts[] = {
-      {-5,              h},
+      {-5,              h+4},
       {w*27/100, h-mh1+3},
       {w*28/100, h-mh1+1},
       {w*29/100,   h-mh1},
       {w*30/100, h-mh1+1},
       {w*31/100, h-mh1+3},
-      {w*62/100,        h},
+      {w*62/100,        h+4},
     };
     GPathInfo info = { .num_points = 7, .points = pts };
     GPath *path = gpath_create(&info);
@@ -341,13 +341,13 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   }
   {
     GPoint pts[] = {
-      {w*33/100,        h},
+      {w*33/100,        h+4},
       {w*68/100, h-mh2+4},
       {w*69/100, h-mh2+1},
       {w*70/100,   h-mh2},
       {w*71/100, h-mh2+1},
       {w*72/100, h-mh2+4},
-      {w+5,             h},
+      {w+5,             h+4},
     };
     GPathInfo info = { .num_points = 7, .points = pts };
     GPath *path = gpath_create(&info);
@@ -356,31 +356,79 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     gpath_destroy(path);
   }
 
-  // Snow lines: zigzag strokes across upper portion of each mountain
+#ifdef PBL_COLOR
+  // Snow cap: white fill from slope boundary up to peak chamfer
+  graphics_context_set_fill_color(ctx, GColorWhite);
+  {
+    int t = 35;
+    int xl = w*29/100 - (w*29/100+5)*t/100;
+    int xr = w*29/100 + w*33/100*t/100;
+    int zy = h - mh1 + mh1*t/100;
+    GPoint sp[] = {{xl,       zy},
+                   {w*27/100, h-mh1+3}, {w*28/100, h-mh1+1},
+                   {w*29/100, h-mh1},
+                   {w*30/100, h-mh1+1}, {w*31/100, h-mh1+3},
+                   {xr,       zy}};
+    GPathInfo spi = {.num_points = 7, .points = sp};
+    GPath *sp2 = gpath_create(&spi);
+    gpath_draw_filled(ctx, sp2);
+    gpath_destroy(sp2);
+  }
+  {
+    int t = 35;
+    int xl = w*70/100 - w*37/100*t/100;
+    int xr = w*70/100 + (w*30/100+5)*t/100;
+    int zy = h - mh2 + mh2*t/100;
+    GPoint sp[] = {{xl,       zy},
+                   {w*68/100, h-mh2+4}, {w*69/100, h-mh2+1},
+                   {w*70/100, h-mh2},
+                   {w*71/100, h-mh2+1}, {w*72/100, h-mh2+4},
+                   {xr,       zy}};
+    GPathInfo spi = {.num_points = 7, .points = sp};
+    GPath *sp2 = gpath_create(&spi);
+    gpath_draw_filled(ctx, sp2);
+    gpath_destroy(sp2);
+  }
+#endif
+
+  // Snow line: slanted zigzag following the mountain slope, constrained within bounds
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
   {
-    int zy  = (h - mh1) + mh1 * 35 / 100;
-    int amp = mh1 / 12;
-    int xl  = w * 18 / 100, xr = w * 40 / 100;
-    GPoint prev = GPoint(xl, zy - amp);
-    for (int i = 1; i <= 6; i++) {
-      int x   = xl + (xr - xl) * i / 6;
-      int y   = (i % 2 == 0) ? zy - amp : zy + amp;
-      graphics_draw_line(ctx, prev, GPoint(x, y));
-      prev = GPoint(x, y);
+    // Mountain 1: peak at px=w*29/100. Left slope run = px+5, right slope run = w*33/100.
+    int px = w*29/100, py = h-mh1;
+    int ldx = px+5, rdx = w*33/100;
+    int amp = mh1/12;
+    // xl/xr inset so the -amp tooth exactly touches the mountain boundary
+    int xl = px - ldx*30/100 + ldx*amp/mh1 + 2;
+    int xr = px + rdx*55/100 - rdx*amp/mh1 - 2;
+    int zy_l = py + mh1*30/100;
+    int zy_r = py + mh1*55/100;
+    GPoint prev = {0, 0};
+    for (int i = 0; i <= 6; i++) {
+      int x  = xl + (xr - xl) * i / 6;
+      int zy = zy_l + (zy_r - zy_l) * i / 6;
+      GPoint pt = {(int16_t)x, (int16_t)(zy + (i % 2 == 0 ? -amp : amp))};
+      if (i > 0) graphics_draw_line(ctx, prev, pt);
+      prev = pt;
     }
   }
   {
-    int zy  = (h - mh2) + mh2 * 35 / 100;
-    int amp = mh2 / 12;
-    int xl  = w * 57 / 100, xr = w * 81 / 100;
-    GPoint prev = GPoint(xl, zy - amp);
-    for (int i = 1; i <= 6; i++) {
-      int x   = xl + (xr - xl) * i / 6;
-      int y   = (i % 2 == 0) ? zy - amp : zy + amp;
-      graphics_draw_line(ctx, prev, GPoint(x, y));
-      prev = GPoint(x, y);
+    // Mountain 2: peak at px=w*70/100. Left slope run = w*37/100, right slope run = w*30/100+5.
+    int px = w*70/100, py = h-mh2;
+    int ldx = w*37/100, rdx = w*30/100+5;
+    int amp = mh2/12;
+    int xl = px - ldx*30/100 + ldx*amp/mh2 + 2;
+    int xr = px + rdx*55/100 - rdx*amp/mh2 - 2;
+    int zy_l = py + mh2*30/100;
+    int zy_r = py + mh2*55/100;
+    GPoint prev = {0, 0};
+    for (int i = 0; i <= 6; i++) {
+      int x  = xl + (xr - xl) * i / 6;
+      int zy = zy_l + (zy_r - zy_l) * i / 6;
+      GPoint pt = {(int16_t)x, (int16_t)(zy + (i % 2 == 0 ? -amp : amp))};
+      if (i > 0) graphics_draw_line(ctx, prev, pt);
+      prev = pt;
     }
   }
 }
@@ -430,8 +478,7 @@ static void draw_globe(GContext *ctx, GRect bounds) {
 
 }
 
-// On round watches, draw a white road strip with black top edge at screen bottom.
-// The circular hardware clip masks the ends automatically.
+// Road strip: white fill with black top edge at screen bottom (round only).
 #ifdef PBL_ROUND
 static void draw_road_strip(GContext *ctx, GRect bounds) {
   int strip_h = 22;
@@ -471,10 +518,9 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int num_h  = large ? 68 : 52;
   int lbl_y  = y + (large ? 60 : 44);
 #else
-  (void)large;
-  GFont num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
-  int num_h  = 52;
-  int lbl_y  = y + 44;
+  GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_LECO_28_LIGHT_NUMBERS);
+  int num_h  = large ? 52 : 36;
+  int lbl_y  = y + (large ? 44 : 30);
 #endif
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, number, num_font,
@@ -500,10 +546,10 @@ static CarState car_target_for_page(int page, GRect bounds) {
 
   switch (page) {
     case PAGE_CHARGE_TIME: {
-      int cw = w * 64 / 100;
+      int cw = w * 85 / 100;
       int ch = cw * 72 / 161;
       t.w = cw;
-      t.x = w / 2 - cw / 2;
+      t.x = w - cw / 2;  // center of car at right edge — half off screen
 #ifdef PBL_ROUND
       t.y = h - 22 - ch;
 #else
@@ -595,7 +641,6 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   int cw = (int)s_car_cur.w;
   int ch = cw * 72 / 161;
 
-#ifdef PBL_ROUND
   if (s_ground_morph) {
     int w = bounds.size.w, h = bounds.size.h;
     int gr   = w * 52 / 100;
@@ -607,15 +652,15 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
     int cur_cx = (int)LERP_P(flat_cx, (int32_t)gx, s_ground_morph_p);
     int cur_cy = (int)LERP_P(flat_cy, (int32_t)gy, s_ground_morph_p);
     int cur_r  = (int)LERP_P(flat_r,  (int32_t)gr,  s_ground_morph_p);
-    // Road strip rect as flat base throughout the morph
     graphics_context_set_fill_color(ctx, COLOR_FG);
     graphics_fill_rect(ctx, GRect(0, h - 22, w, 22), 0, GCornerNone);
-    // Growing dome fill + curving outline
     graphics_fill_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
     graphics_context_set_stroke_color(ctx, COLOR_DARK);
     graphics_context_set_stroke_width(ctx, 4);
     graphics_draw_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
-  } else {
+  }
+#ifdef PBL_ROUND
+  else {
     int car_bottom = (int)s_car_cur.y + ch;
     if (car_bottom >= bounds.size.h - 30 && (int)s_car_cur.y < bounds.size.h) {
       draw_road_strip(ctx, bounds);
@@ -865,6 +910,12 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     case PAGE_ODO:         draw_page_odo(ctx, bounds);         break;
     case PAGE_LOCATION:    draw_page_location(ctx, bounds);    break;
   }
+
+  // Semi-circle on right edge indicating an action menu is available on select
+  if (page == PAGE_CLIMATE || page == PAGE_LOCK || page == PAGE_LOCATION) {
+    graphics_context_set_fill_color(ctx, COLOR_DARK);
+    graphics_fill_circle(ctx, GPoint(bounds.size.w, bounds.size.h / 2), 16);
+  }
 }
 
 // ── AppMessage ────────────────────────────────────────────────────────────────
@@ -1065,7 +1116,17 @@ static void navigate(int dir) {
   CarState target = car_target_for_page(s_page, bounds);
   s_ground_morph   = (from_car && to_car && s_anim_from_page == PAGE_RANGE && s_page == PAGE_ODO);
   s_ground_morph_p = 0;
-  if (!from_car && to_car) {
+  bool odo_to_loc = (s_anim_from_page == PAGE_ODO && s_page == PAGE_LOCATION);
+  bool loc_to_odo = (s_anim_from_page == PAGE_LOCATION && s_page == PAGE_ODO);
+  if (odo_to_loc) {
+    // Car slides left with the globe (stays attached to outgoing canvas)
+    s_car_phase[0] = s_car_cur;
+    target = s_car_cur;
+    target.x -= w;
+  } else if (loc_to_odo) {
+    // Car arrives from right with the incoming globe canvas
+    s_car_phase[0] = (CarState){ target.x + w, target.y, target.w, target.rot };
+  } else if (!from_car && to_car) {
     // Car drives in from the navigation edge (e.g. lock → charge_time)
     int32_t enter_x = dir > 0
       ? -(int32_t)(target.w + 4)
