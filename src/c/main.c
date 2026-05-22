@@ -39,7 +39,7 @@
 
 // ── Colors ────────────────────────────────────────────────────────────────────
 #ifdef PBL_COLOR
-  #define COLOR_BG  GColorOrange
+  #define COLOR_BG  GColorChromeYellow
 #else
   #define COLOR_BG  GColorBlack
 #endif
@@ -113,39 +113,46 @@ static void icon_stroke(GContext *ctx) {
 static void draw_icon_car(GContext *ctx, GRect r) {
   int x = r.origin.x, y = r.origin.y, w = r.size.w, h = r.size.h;
 
-  int wr  = h * 3 / 11;
-  int wy  = y + h - wr;
-  int wlx = x + w / 4;
-  int wrx = x + w * 3 / 4;
-  int sill_y = wy - h / 5;
-  int sill_h = (wy - sill_y) + wr;
-  int cab_x = x + w / 7;
-  int cab_w = w * 5 / 7;
-  int cab_y = y + 2;
-  int cab_h = sill_y - cab_y + 6;
+  // Body polygon scaled from car_body.svg (161×54 viewBox).
+  // Wheel circles take the bottom ~20% of height; body fills the rest.
+  int wheel_r = MAX(h / 5, 8);
+  int body_h  = h - wheel_r;
+
+  GPoint pts[] = {
+    {(int16_t)(x +   5*w/161), (int16_t)(y + 19*body_h/54)},
+    {(int16_t)(x +   3*w/161), (int16_t)(y + 43*body_h/54)},
+    {(int16_t)(x +  30*w/161), (int16_t)(y + 51*body_h/54)},
+    {(int16_t)(x + 136*w/161), (int16_t)(y + 51*body_h/54)},
+    {(int16_t)(x + 158*w/161), (int16_t)(y + 48*body_h/54)},
+    {(int16_t)(x + 156*w/161), (int16_t)(y + 27*body_h/54)},
+    {(int16_t)(x + 119*w/161), (int16_t)(y + 19*body_h/54)},
+    {(int16_t)(x +  89*w/161), (int16_t)(y +  3*body_h/54)},
+    {(int16_t)(x +  44*w/161), (int16_t)(y +  3*body_h/54)},
+  };
+  GPathInfo info = { .num_points = 9, .points = pts };
+  GPath *path = gpath_create(&info);
 
   icon_fill(ctx);
-  graphics_fill_rect(ctx, GRect(x + 2, sill_y, w - 4, sill_h), 6, GCornersAll);
-  graphics_fill_rect(ctx, GRect(cab_x, cab_y, cab_w, cab_h), 12, GCornersTop);
-  graphics_fill_circle(ctx, GPoint(wlx, wy), wr);
-  graphics_fill_circle(ctx, GPoint(wrx, wy), wr);
-
+  gpath_draw_filled(ctx, path);
   icon_stroke(ctx);
-  graphics_draw_round_rect(ctx, GRect(x + 2, sill_y, w - 4, sill_h), 6);
-  graphics_draw_round_rect(ctx, GRect(cab_x, cab_y, cab_w, cab_h), 12);
-  graphics_draw_circle(ctx, GPoint(wlx, wy), wr);
-  graphics_draw_circle(ctx, GPoint(wrx, wy), wr);
+  gpath_draw_outline(ctx, path);
+  gpath_destroy(path);
 
-  // White stroke erases the cabin/sill seam → unified silhouette
-  graphics_context_set_stroke_color(ctx, COLOR_FG);
-  graphics_context_set_stroke_width(ctx, 5);
-  graphics_draw_line(ctx,
-    GPoint(cab_x + 5, sill_y),
-    GPoint(cab_x + cab_w - 5, sill_y));
+  // Wheels: front axle at ~35% from left, rear at ~68%, centred at body bottom
+  int wheel_y  = y + body_h;
+  int front_wx = x + 57  * w / 161;
+  int rear_wx  = x + 110 * w / 161;
+
+  icon_fill(ctx);
+  graphics_fill_circle(ctx, GPoint(front_wx, wheel_y), wheel_r);
+  graphics_fill_circle(ctx, GPoint(rear_wx,  wheel_y), wheel_r);
+  icon_stroke(ctx);
+  graphics_draw_circle(ctx, GPoint(front_wx, wheel_y), wheel_r);
+  graphics_draw_circle(ctx, GPoint(rear_wx,  wheel_y), wheel_r);
 
   graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_circle(ctx, GPoint(wlx, wy), 4);
-  graphics_fill_circle(ctx, GPoint(wrx, wy), 4);
+  graphics_fill_circle(ctx, GPoint(front_wx, wheel_y), 3);
+  graphics_fill_circle(ctx, GPoint(rear_wx,  wheel_y), 3);
 }
 
 static void draw_icon_charger(GContext *ctx, GRect r) {
@@ -553,9 +560,23 @@ static void inbox_dropped(AppMessageResult reason, void *context) {
 // ── Location action menu ──────────────────────────────────────────────────────
 
 static void action_menu_select_cb(int index, void *context) {
-  if (index == 0) {
-    vibes_short_pulse();
-    send_cmd(CMD_HONK);
+  switch (s_page) {
+    case PAGE_CLIMATE:
+      s_state.climate_on = !s_state.climate_on;
+      layer_mark_dirty(s_canvas);
+      send_cmd(CMD_TOGGLE_CLIMATE);
+      break;
+    case PAGE_LOCK:
+      s_state.locked = !s_state.locked;
+      layer_mark_dirty(s_canvas);
+      send_cmd(CMD_TOGGLE_LOCK);
+      break;
+    case PAGE_LOCATION:
+      vibes_short_pulse();
+      send_cmd(CMD_HONK);
+      break;
+    default:
+      break;
   }
   window_stack_pop(true);
 }
@@ -564,12 +585,28 @@ static void action_window_load(Window *window) {
   Layer *root   = window_get_root_layer(window);
   GRect  bounds = layer_get_bounds(root);
 
-  static SimpleMenuItem items[] = {
+  static SimpleMenuItem climate_items[] = {
+    { .title = "Toggle Climate", .subtitle = "Turn climate on/off", .callback = action_menu_select_cb },
+  };
+  static SimpleMenuItem lock_items[] = {
+    { .title = "Toggle Lock", .subtitle = "Lock or unlock car", .callback = action_menu_select_cb },
+  };
+  static SimpleMenuItem location_items[] = {
     { .title = "Honk + Flash", .subtitle = "Locate your car", .callback = action_menu_select_cb },
   };
-  static SimpleMenuSection sections[] = {
-    { .title = "Actions", .items = items, .num_items = 1 },
-  };
+  static SimpleMenuSection sections[1];
+
+  switch (s_page) {
+    case PAGE_CLIMATE:
+      sections[0] = (SimpleMenuSection){ .title = "Climate", .items = climate_items, .num_items = 1 };
+      break;
+    case PAGE_LOCK:
+      sections[0] = (SimpleMenuSection){ .title = "Lock", .items = lock_items, .num_items = 1 };
+      break;
+    default:
+      sections[0] = (SimpleMenuSection){ .title = "Actions", .items = location_items, .num_items = 1 };
+      break;
+  }
 
   s_action_menu_layer = simple_menu_layer_create(bounds, window, sections, 1, NULL);
   layer_add_child(root, simple_menu_layer_get_layer(s_action_menu_layer));
@@ -613,15 +650,7 @@ static void down_click(ClickRecognizerRef recognizer, void *context) {
 static void select_click(ClickRecognizerRef recognizer, void *context) {
   switch (s_page) {
     case PAGE_CLIMATE:
-      s_state.climate_on = !s_state.climate_on;
-      layer_mark_dirty(s_canvas);
-      send_cmd(CMD_TOGGLE_CLIMATE);
-      break;
     case PAGE_LOCK:
-      s_state.locked = !s_state.locked;
-      layer_mark_dirty(s_canvas);
-      send_cmd(CMD_TOGGLE_LOCK);
-      break;
     case PAGE_LOCATION:
       open_action_menu();
       break;
