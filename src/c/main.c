@@ -57,9 +57,9 @@
 #ifdef PBL_ROUND
   #define INSET_X  22
 #elif defined(PBL_PLATFORM_GABBRO)
-  #define INSET_X  16
+  #define INSET_X  18
 #else
-  #define INSET_X   8
+  #define INSET_X  14
 #endif
 // On round screens the circle is too narrow near the top to fit INSET_X=22;
 // drop content lower to where the circle left edge ≈ INSET_X.
@@ -211,7 +211,7 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   for (int pass = 0; pass < 2; pass++) {
     if (pass == 0) {
       graphics_context_set_stroke_color(ctx, COLOR_DARK);
-      graphics_context_set_stroke_width(ctx, 8);
+      graphics_context_set_stroke_width(ctx, 12);
     } else {
       graphics_context_set_stroke_color(ctx, COLOR_FG);
       graphics_context_set_stroke_width(ctx, 4);
@@ -418,20 +418,19 @@ static void draw_text(GContext *ctx, const char *text, GFont font, GRect rect,
   graphics_draw_text(ctx, text, font, rect, overflow, align, NULL);
 }
 
-// Helper: draw LECO number + label below it. large=true uses GOTHIC_28_BOLD.
+// Helper: draw value + label below it. Same BITHAM_42_BOLD font as climate ON/OFF.
 static void draw_big_stat(GContext *ctx, GRect bounds,
                           const char *number, const char *label, bool large) {
   int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
-  GFont lf = fonts_get_system_font(large ? FONT_KEY_GOTHIC_28_BOLD : FONT_KEY_GOTHIC_24_BOLD);
-  int lh = large ? 80 : 68;
+  (void)large;  // font size now uniform across all pages
 
   graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49),
-            GRect(INSET_X, y, w, 60),
+  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
+            GRect(INSET_X, y, w, 52),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
-  draw_text(ctx, label, lf,
-            GRect(INSET_X, y + 40, w, lh),
+  draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, y + 44, w, 70),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 0);
 }
 
@@ -464,11 +463,11 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y, w, 52),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
   draw_text(ctx, "climate",
-            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-            GRect(INSET_X, y + 52, w, 36),
+            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, y + 44, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = y + 52 + 36 + 8;
+  int div_y = y + 44 + 36 + 8;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
   graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
@@ -480,9 +479,9 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
   } else {
     snprintf(temp_buf, sizeof(temp_buf), "%d\xC2\xB0""F outside", s_state.outside_temp);
   }
-  draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-            GRect(INSET_X, div_y + 8, w, 38),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
+  draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, div_y + 8, w, 36),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 }
 
 static void draw_page_lock(GContext *ctx, GRect bounds) {
@@ -498,9 +497,9 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
 
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, s_state.locked ? "locked" : "unlocked",
-            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, icon_y + icon_h + gap, w, lbl_h),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 5);
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 0);
 }
 
 static void draw_page_charge_time(GContext *ctx, GRect bounds) {
@@ -620,11 +619,11 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y, w, 80),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 0);
   draw_text(ctx, "current location",
-            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-            GRect(INSET_X, y + 80, w, 36),
+            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, y + 80, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = y + 80 + 36 + 4;
+  int div_y = y + 80 + 32 + 4;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
   graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
@@ -650,7 +649,7 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
     }
   }
   draw_text(ctx, dist_buf,
-            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, div_y + 8, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 }
