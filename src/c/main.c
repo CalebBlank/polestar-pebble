@@ -351,35 +351,32 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     gpath_destroy(path);
   }
 
-  // Snow caps: white triangles at each peak
-  graphics_context_set_fill_color(ctx, COLOR_FG);
+  // Snow lines: zigzag strokes across upper portion of each mountain
+  graphics_context_set_stroke_color(ctx, COLOR_DARK);
+  graphics_context_set_stroke_width(ctx, 4);
   {
-    int cap_h = mh1 / 4;
-    int cap_w = cap_h * 5 / 3;
-    int px = w * 29 / 100, py = h - mh1;
-    GPoint pts[] = {
-      {px - cap_w / 2, py + cap_h},
-      {px,             py},
-      {px + cap_w / 2, py + cap_h},
-    };
-    GPathInfo info = { .num_points = 3, .points = pts };
-    GPath *path = gpath_create(&info);
-    gpath_draw_filled(ctx, path);
-    gpath_destroy(path);
+    int zy  = (h - mh1) + mh1 * 35 / 100;
+    int amp = mh1 / 12;
+    int xl  = w * 18 / 100, xr = w * 40 / 100;
+    GPoint prev = GPoint(xl, zy - amp);
+    for (int i = 1; i <= 6; i++) {
+      int x   = xl + (xr - xl) * i / 6;
+      int y   = (i % 2 == 0) ? zy - amp : zy + amp;
+      graphics_draw_line(ctx, prev, GPoint(x, y));
+      prev = GPoint(x, y);
+    }
   }
   {
-    int cap_h = mh2 / 4;
-    int cap_w = cap_h * 5 / 3;
-    int px = w * 70 / 100, py = h - mh2;
-    GPoint pts[] = {
-      {px - cap_w / 2, py + cap_h},
-      {px,             py},
-      {px + cap_w / 2, py + cap_h},
-    };
-    GPathInfo info = { .num_points = 3, .points = pts };
-    GPath *path = gpath_create(&info);
-    gpath_draw_filled(ctx, path);
-    gpath_destroy(path);
+    int zy  = (h - mh2) + mh2 * 35 / 100;
+    int amp = mh2 / 12;
+    int xl  = w * 57 / 100, xr = w * 81 / 100;
+    GPoint prev = GPoint(xl, zy - amp);
+    for (int i = 1; i <= 6; i++) {
+      int x   = xl + (xr - xl) * i / 6;
+      int y   = (i % 2 == 0) ? zy - amp : zy + amp;
+      graphics_draw_line(ctx, prev, GPoint(x, y));
+      prev = GPoint(x, y);
+    }
   }
 }
 
