@@ -1,0 +1,8 @@
+build/
+.lock-waf*
+*.pyc
+__pycache__/
+*.mp4
+*.zip
+node_modules/
+.pebble-linked-sdk

@@ -56,8 +56,13 @@
 #else
   #define INSET_X   8
 #endif
-// Content starts just below the StatusBarLayer (16 px) with 2 px gap
-#define CONTENT_Y (STATUS_BAR_LAYER_HEIGHT + 2)
+// On round screens the circle is too narrow near the top to fit INSET_X=22;
+// drop content lower to where the circle left edge ≈ INSET_X.
+#ifdef PBL_ROUND
+  #define CONTENT_Y 60
+#else
+  #define CONTENT_Y (STATUS_BAR_LAYER_HEIGHT + 2)
+#endif
 
 // ── App state ─────────────────────────────────────────────────────────────────
 static struct {
@@ -200,13 +205,17 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   graphics_fill_rect(ctx,
     GRect(arc_cx + arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0, GCornerNone);
 
-  // Shackle arc (thick white stroke, top semicircle)
+  // Shackle arc: top semicircle drawn as two 90° quarters to avoid wrap-around issues.
+  // 270°→360° = left quarter (9→12 o'clock), 0°→90° = right quarter (12→3 o'clock).
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, arm_sw);
-  graphics_draw_arc(ctx,
-    GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2),
-    GOvalScaleModeFitCircle,
-    DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(180));
+  {
+    GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
+    graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
+                      DEG_TO_TRIGANGLE(270), DEG_TO_TRIGANGLE(360));
+    graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
+                      DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
+  }
 
   // Lock body: white fill + black outline
   icon_fill(ctx);
@@ -222,53 +231,41 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   graphics_draw_line(ctx, GPoint(cx - kl, ky), GPoint(cx + kl, ky));
 }
 
-static void draw_icon_climate(GContext *ctx, GRect r, bool on) {
-  int cx     = r.origin.x + r.size.w / 2;
-  int cy     = r.origin.y + r.size.h / 2;
-  int radius = MIN(r.size.w, r.size.h) / 2 - 2;
-  GColor col = on ? COLOR_FG : COLOR_DIM;
 
-  graphics_context_set_stroke_color(ctx, col);
-  graphics_context_set_stroke_width(ctx, 2);
-  graphics_context_set_fill_color(ctx, col);
-
-  graphics_fill_circle(ctx, GPoint(cx, cy), 5);
-
-  for (int i = 0; i < 6; i++) {
-    int32_t angle = DEG_TO_TRIGANGLE(i * 60);
-    int ex = cx + (radius * sin_lookup(angle) / TRIG_MAX_RATIO);
-    int ey = cy - (radius * cos_lookup(angle) / TRIG_MAX_RATIO);
-    graphics_draw_line(ctx, GPoint(cx, cy), GPoint(ex, ey));
-
-    int32_t perp = DEG_TO_TRIGANGLE(i * 60 + 90);
-    int mx = cx + ((radius * 6 / 10) * sin_lookup(angle) / TRIG_MAX_RATIO);
-    int my = cy - ((radius * 6 / 10) * cos_lookup(angle) / TRIG_MAX_RATIO);
-    int dx = (5 * sin_lookup(perp) / TRIG_MAX_RATIO);
-    int dy = -(5 * cos_lookup(perp) / TRIG_MAX_RATIO);
-    graphics_draw_line(ctx, GPoint(mx - dx, my - dy), GPoint(mx + dx, my + dy));
-  }
+// Draw two triangular mountain peaks behind the car.
+static void draw_triangle(GContext *ctx, GPoint a, GPoint b, GPoint c) {
+  GPoint pts[3] = {a, b, c};
+  GPathInfo info = { .num_points = 3, .points = pts };
+  GPath *path = gpath_create(&info);
+  gpath_draw_filled(ctx, path);
+  gpath_draw_outline(ctx, path);
+  gpath_destroy(path);
 }
 
-static void draw_icon_globe(GContext *ctx, GRect r) {
-  int cx     = r.origin.x + r.size.w / 2;
-  int cy     = r.origin.y + r.size.h / 2;
-  int radius = MIN(r.size.w, r.size.h) / 2 - 3;
-
-  icon_fill(ctx);
-  graphics_fill_circle(ctx, GPoint(cx, cy), radius);
-  icon_stroke(ctx);
-  graphics_draw_circle(ctx, GPoint(cx, cy), radius);
-
+static void draw_mountains(GContext *ctx, GRect bounds) {
+  int w = bounds.size.w;
+  int h = bounds.size.h;
+  graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 2);
-  for (int dy = -radius / 2; dy <= radius / 2; dy += radius / 2) {
-    int hw = radius * 7 / 8;
-    graphics_draw_line(ctx, GPoint(cx - hw, cy + dy), GPoint(cx + hw, cy + dy));
-  }
-  graphics_draw_line(ctx, GPoint(cx, cy - radius + 2), GPoint(cx, cy + radius - 2));
+  draw_triangle(ctx, GPoint(-5, h), GPoint(w * 29 / 100, h - 76), GPoint(w * 62 / 100, h));
+  draw_triangle(ctx, GPoint(w * 33 / 100, h), GPoint(w * 70 / 100, h - 94), GPoint(w + 5, h));
+}
 
-  graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_rect(ctx, GRect(cx - 10, cy - radius / 3 - 4, 20, 8), 2, GCornersAll);
+// Draw a dome hill at the bottom with a car perched on top.
+static void draw_hills_and_car(GContext *ctx, GRect bounds) {
+  int w = bounds.size.w;
+  int h = bounds.size.h;
+  int hill_r = w * 3 / 4;
+  GPoint hill_center = GPoint(w / 2, h - 80 + hill_r);
+  graphics_context_set_fill_color(ctx, COLOR_FG);
+  graphics_fill_circle(ctx, hill_center, hill_r);
+  graphics_context_set_stroke_color(ctx, COLOR_DARK);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_draw_circle(ctx, hill_center, hill_r);
+  int car_h = 50, car_w = 96;
+  int dome_top = h - 80;
+  draw_icon_car(ctx, GRect(w / 2 - car_w / 2, dome_top - car_h + 4, car_w, car_h));
 }
 
 // On round watches, draw a white road strip with black top edge at screen bottom.
@@ -311,22 +308,23 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
             GRect(INSET_X, y, w, 56),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 56, w, 36),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
+            GRect(INSET_X, y + 56, w, 68),
+            GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
 }
 
 // Helper: draw car icon at bottom of screen, with road strip on round watches
 static void draw_car_bottom(GContext *ctx, GRect bounds) {
 #ifdef PBL_ROUND
-  // Car bleeds off the right edge — circular clip handles masking
-  int bleed_w = bounds.size.w * 5 / 4;
-  int car_h   = 66;
-  int car_y   = bounds.size.h - car_h - 24;
-  draw_icon_car(ctx, GRect(bounds.size.w / 8, car_y, bleed_w, car_h));
+  int car_w = 160;
+  int car_h = 64;
+  int car_x = bounds.size.w / 2 - car_w / 2;
+  int car_y = bounds.size.h - car_h - 14;
+  draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h));
   draw_road_strip(ctx, bounds);
 #else
-  draw_icon_car(ctx, GRect(INSET_X, bounds.size.h - 62,
-                           bounds.size.w - INSET_X * 2, 58));
+  int car_w = MIN(bounds.size.w - INSET_X * 2, 150);
+  int car_x = bounds.size.w / 2 - car_w / 2;
+  draw_icon_car(ctx, GRect(car_x, bounds.size.h - 68, car_w, 62));
 #endif
 }
 
@@ -340,42 +338,47 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
   draw_text(ctx, s_state.climate_on ? "ON" : "OFF",
             fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
             GRect(INSET_X, y, w, 52),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
   draw_text(ctx, "climate",
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 52, w / 2, 30),
+            GRect(INSET_X, y + 52, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
 
-  char temp_buf[16];
+  // Divider line
+  int div_y = y + 52 + 32 + 10;
+  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
+
+  // Outside temperature below divider
+  char temp_buf[24];
   if (s_state.use_metric) {
     int c = (s_state.outside_temp - 32) * 5 / 9;
-    snprintf(temp_buf, sizeof(temp_buf), "out %d\xC2\xB0""C", c);
+    snprintf(temp_buf, sizeof(temp_buf), "%d\xC2\xB0""C outside", c);
   } else {
-    snprintf(temp_buf, sizeof(temp_buf), "out %d\xC2\xB0""F", s_state.outside_temp);
+    snprintf(temp_buf, sizeof(temp_buf), "%d\xC2\xB0""F outside", s_state.outside_temp);
   }
-  draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_18),
-            GRect(INSET_X, bounds.size.h - 44, w / 2, 40),
+  draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, div_y + 8, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
-
-  draw_icon_climate(ctx,
-    GRect(bounds.size.w / 2 + 4, bounds.size.h - 54, w / 2 - 4, 48),
-    s_state.climate_on);
 }
 
 static void draw_page_lock(GContext *ctx, GRect bounds) {
-  int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
+  int lbl_h = 32;
+  int gap = 6;
+  int icon_y = CONTENT_Y + 2;
+  int icon_h = bounds.size.h - icon_y - lbl_h - gap - 8;
+
+  draw_icon_lock(ctx,
+    GRect(INSET_X, icon_y, w, icon_h),
+    s_state.locked);
 
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, s_state.locked ? "locked" : "unlocked",
-            fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
-            GRect(INSET_X, y, w, 52),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
-
-  int icon_y = y + 60;
-  draw_icon_lock(ctx,
-    GRect(INSET_X, icon_y, bounds.size.w - INSET_X * 2, bounds.size.h - icon_y - 8),
-    s_state.locked);
+            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, icon_y + icon_h + gap, w, lbl_h),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 5);
 }
 
 static void draw_page_charge_time(GContext *ctx, GRect bounds) {
@@ -386,7 +389,7 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
     draw_text(ctx, "NOT",
               fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
               GRect(INSET_X, y, w, 52),
-              GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
+              GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
     draw_text(ctx, "charging",
               fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
               GRect(INSET_X, y + 52, w, 30),
@@ -394,10 +397,15 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
   } else {
     char num[8];
     snprintf(num, sizeof(num), "%d", s_state.charge_min);
-    draw_big_stat(ctx, bounds, num, "min to full");
+    draw_big_stat(ctx, bounds, num, "minutes\nuntil full");
   }
+#ifdef PBL_ROUND
   draw_icon_charger(ctx,
-    GRect(bounds.size.w - INSET_X - 54, bounds.size.h - 64, 50, 56));
+    GRect(bounds.size.w / 2 + 14, bounds.size.h - 116, 88, 108));
+#else
+  draw_icon_charger(ctx,
+    GRect(bounds.size.w - INSET_X - 78, bounds.size.h - 96, 74, 88));
+#endif
 }
 
 // Draws a % glyph sized to sit beside LECO_42_NUMBERS digits.
@@ -436,8 +444,18 @@ static void draw_page_range(GContext *ctx, GRect bounds) {
     : (int)(s_state.range_km * 621 / 1000);
   snprintf(num, sizeof(num), "%d", val);
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "km range" : "mi range");
-  draw_car_bottom(ctx, bounds);
+    s_state.use_metric ? "kilometer\nrange" : "mile\nrange");
+  draw_mountains(ctx, bounds);
+  {
+    int car_w = 140;
+    int car_h = 54;
+    int car_x = bounds.size.w / 2 - car_w / 2;
+    int car_y = bounds.size.h - car_h - 24;
+    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h));
+  }
+#ifdef PBL_ROUND
+  draw_road_strip(ctx, bounds);
+#endif
 }
 
 static void draw_page_odo(GContext *ctx, GRect bounds) {
@@ -447,30 +465,23 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
     : (int)(s_state.odo_km * 621 / 1000);
   snprintf(num, sizeof(num), "%d", val);
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "km driven" : "mi driven");
+    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven");
 
-  int icon_sz = MIN(bounds.size.w - INSET_X * 2, 60);
-  draw_icon_globe(ctx,
-    GRect(bounds.size.w / 2 - icon_sz / 2, bounds.size.h - icon_sz - 8,
-          icon_sz, icon_sz));
+  draw_hills_and_car(ctx, bounds);
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
   int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
   graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, "current\nlocation",
-            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y, w, 56),
-            GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
   draw_text(ctx, s_state.location,
-            fonts_get_system_font(FONT_KEY_GOTHIC_18),
-            GRect(INSET_X, y + 60, w, bounds.size.h - y - 68),
+            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, y, w, 90),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
-  draw_text(ctx, "press for actions",
-            fonts_get_system_font(FONT_KEY_GOTHIC_14),
-            GRect(INSET_X, bounds.size.h - 18, w, 16),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 0);
+  draw_text(ctx, "current location",
+            fonts_get_system_font(FONT_KEY_GOTHIC_18),
+            GRect(INSET_X, y + 90, w, 26),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
 }
 
 // ── Canvas update ─────────────────────────────────────────────────────────────
