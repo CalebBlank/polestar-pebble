@@ -110,8 +110,11 @@ static int               s_action_pending  = -1;
 static bool              s_animating       = false;
 static Layer            *s_anim_layer      = NULL;
 static int               s_anim_from_page  = 0;
-static int32_t           s_car_anim_x      = 0;
-static Animation        *s_car_anim        = NULL;
+typedef struct { int32_t x, y, w, rot; } CarState;
+static CarState          s_car_cur;          // current (animated) state
+static CarState          s_car_phase[4];     // [0]=exit_from [1]=exit_to [2]=enter_from [3]=enter_to
+static bool              s_car_drive_mode;   // true=drive off/on, false=simple lerp
+static Layer            *s_car_layer        = NULL;
 
 // ── Icon drawing ──────────────────────────────────────────────────────────────
 
@@ -245,21 +248,22 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int by = r.origin.y + (r.size.h - total_h) / 2 + arc_r + arm_h;
   int bx = cx - bw / 2;
 
-  // Shackle arc center: body_top minus arm height
-  // Unlocked: shift arc well off the right edge so it disappears
-  int arc_cx = locked ? cx : cx + bw * 2;
+  // Shackle arc centered on body. Unlocked: right arm stops short, left stays in body.
+  int arc_cx = cx;
   int arc_cy = by - arm_h;
-
-  // Shackle: draw black outline layer first, then white fill on top.
   int ol = 4;  // outline thickness in px
+
+  // Left arm always inserts into body; right arm has a gap when unlocked
+  int left_bot  = by + ol;
+  int right_bot = locked ? (by + ol) : (by - arm_h / 2);
   GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
 
   // --- Black outline pass ---
   graphics_context_set_fill_color(ctx, COLOR_DARK);
   graphics_fill_rect(ctx,
-    GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, by - arc_cy + ol), 0, GCornerNone);
+    GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, left_bot - arc_cy), 0, GCornerNone);
   graphics_fill_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, by - arc_cy + ol), 0, GCornerNone);
+    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, arm_sw + ol * 2);
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
@@ -270,9 +274,9 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   // --- White fill pass ---
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_rect(ctx,
-    GRect(arc_cx - arc_r - arm_sw/2, arc_cy, arm_sw, by - arc_cy + ol), 0, GCornerNone);
+    GRect(arc_cx - arc_r - arm_sw/2, arc_cy, arm_sw, left_bot - arc_cy), 0, GCornerNone);
   graphics_fill_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw/2, arc_cy, arm_sw, by - arc_cy + ol), 0, GCornerNone);
+    GRect(arc_cx + arc_r - arm_sw/2, arc_cy, arm_sw, right_bot - arc_cy), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, arm_sw);
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
@@ -341,8 +345,8 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   }
 }
 
-// Globe with lines from Globe.svg. Center shifted right; car at 25° tilted position.
-static void draw_globe_and_car(GContext *ctx, GRect bounds) {
+// Globe with lines from Globe.svg. Center shifted right.
+static void draw_globe(GContext *ctx, GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
 
@@ -373,26 +377,6 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
     draw_polyline(ctx, p, 4); }
   #undef GP
 
-  // Car at 25° LEFT from top of globe, tilted -25° CCW (front/right tilts up)
-#if defined(PBL_PLATFORM_EMERY)
-  int car_w = w * 40 / 100;
-#elif defined(PBL_PLATFORM_CHALK)
-  int car_w = w * 35 / 100;
-#else
-  int car_w = w * 36 / 100;
-#endif
-  int car_h = car_w * 72 / 161;
-  int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
-  int32_t rot = TRIG_MAX_ANGLE * 335 / 360;  // -25° CCW
-  // Surface point at 25° LEFT from globe top
-  int surf_x = gx - (int32_t)gr * sin_lookup(a25) / TRIG_MAX_RATIO;
-  int surf_y = gy - (int32_t)gr * cos_lookup(a25) / TRIG_MAX_RATIO;
-  int wheel_r = MAX(car_h / 4, 10);
-  int body_h  = car_h - wheel_r;
-  // Place so wheel-center row (body_h from rect top) sits AT surface point
-  draw_icon_car(ctx,
-    GRect(surf_x - car_w / 2, surf_y - body_h, car_w, car_h),
-    rot, 0);
 }
 
 // On round watches, draw a white road strip with black top edge at screen bottom.
@@ -426,9 +410,11 @@ static void draw_text(GContext *ctx, const char *text, GFont font, GRect rect,
 
 // Helper: draw value + label below it. Same BITHAM_42_BOLD font as climate ON/OFF.
 static void draw_big_stat(GContext *ctx, GRect bounds,
-                          const char *number, const char *label, bool large) {
-  int y = CONTENT_Y;
-  int w = bounds.size.w - INSET_X * 2;
+                          const char *number, const char *label, bool large,
+                          int x_extra, int y_extra) {
+  int y = CONTENT_Y + y_extra;
+  int x = INSET_X + x_extra;
+  int w = bounds.size.w - INSET_X * 2 - x_extra;
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_60_NUMBERS_AM_PM : FONT_KEY_LECO_42_NUMBERS);
   int num_h  = large ? 68 : 52;
@@ -441,34 +427,156 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
 #endif
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, number, num_font,
-            GRect(INSET_X, y, w, num_h),
+            GRect(x, y, w, num_h),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, lbl_y, w, 70),
+            GRect(x, lbl_y, w, 70),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 0);
-}
-
-// Helper: draw car icon at bottom of screen, with road strip on round watches
-static void draw_car_bottom(GContext *ctx, GRect bounds) {
-#ifdef PBL_ROUND
-  int car_w = bounds.size.w * 62 / 100;
-  int car_h = car_w * 72 / 161;
-  int car_x = bounds.size.w / 2 - car_w / 2;
-  int car_y = bounds.size.h - 22 - car_h;
-  draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
-  draw_road_strip(ctx, bounds);
-#else
-  int car_w = MIN(bounds.size.w - INSET_X * 2, 150);
-  int car_h = car_w * 72 / 161;
-  int car_x = bounds.size.w / 2 - car_w / 2;
-  draw_icon_car(ctx, GRect(car_x, bounds.size.h - car_h - 2, car_w, car_h), 0, 0);
-#endif
 }
 
 // Semi-circle on the right edge indicating a select-press action menu.
 static void draw_action_affordance(GContext *ctx, GRect bounds) {
   graphics_context_set_fill_color(ctx, COLOR_DARK);
   graphics_fill_circle(ctx, GPoint(bounds.size.w, bounds.size.h / 2), 10);
+}
+
+// ── Car animation helpers ─────────────────────────────────────────────────────
+
+static bool is_car_page(int page) {
+  return page >= PAGE_CHARGE_TIME && page <= PAGE_ODO;
+}
+
+// Per-page car target: position, size, rotation.
+// Pages 2-5 shrink progressively (64%→60%→55%→globe-based).
+static CarState car_target_for_page(int page, GRect bounds) {
+  int w = bounds.size.w, h = bounds.size.h;
+  CarState t = {0, 0, 0, 0};
+
+  switch (page) {
+    case PAGE_CHARGE_TIME: {
+      int cw = w * 64 / 100;
+      int ch = cw * 72 / 161;
+      t.w = cw;
+      t.x = w / 2 - cw / 2;
+#ifdef PBL_ROUND
+      t.y = h - 22 - ch;
+#else
+      t.y = h - ch - 2;
+#endif
+      break;
+    }
+    case PAGE_CHARGE_PCT: {
+      int cw = w * 60 / 100;
+      int ch = cw * 72 / 161;
+      t.w = cw;
+      t.x = w / 2 - cw / 2;
+#ifdef PBL_ROUND
+      t.y = h - 22 - ch;
+#else
+      t.y = h - ch - 2;
+#endif
+      break;
+    }
+    case PAGE_RANGE: {
+      int cw = w * 55 / 100;
+      int ch = cw * 72 / 161;
+      t.w = cw;
+      t.x = w / 2 - cw / 2;
+#ifdef PBL_ROUND
+      t.y = h - 22 - ch;
+#else
+      t.y = h - ch - 2;
+#endif
+      break;
+    }
+    case PAGE_ODO: {
+#if defined(PBL_PLATFORM_EMERY)
+      int cw = w * 40 / 100;
+#elif defined(PBL_PLATFORM_CHALK)
+      int cw = w * 35 / 100;
+#else
+      int cw = w * 36 / 100;
+#endif
+      int ch  = cw * 72 / 161;
+      int gr  = w * 52 / 100;
+      int gx  = w * 75 / 100;
+      int gy  = h + gr / 4;
+      int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
+      int sx  = gx - (int32_t)gr * sin_lookup(a25) / TRIG_MAX_RATIO;
+      int sy  = gy - (int32_t)gr * cos_lookup(a25) / TRIG_MAX_RATIO;
+      int bh  = ch - MAX(ch / 4, 10);
+      t.w   = cw;
+      t.x   = sx - cw / 2 - 6;
+      t.y   = sy - bh - 6;
+      t.rot = -(int32_t)(TRIG_MAX_ANGLE * 25 / 360);
+      break;
+    }
+    default: {
+      // Off-screen below for non-car pages
+      int cw = w * 62 / 100;
+      int ch = cw * 72 / 161;
+      t.w = cw;
+      t.x = w / 2 - cw / 2;
+      t.y = h + ch + 10;
+      break;
+    }
+  }
+  return t;
+}
+
+#define LERP_P(a, b, p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
+
+static void car_anim_update(Animation *anim, const AnimationProgress progress) {
+  if (s_car_drive_mode) {
+    const int32_t EXIT_FRAC = ANIMATION_NORMALIZED_MAX * 35 / 100;
+    if (progress <= EXIT_FRAC) {
+      int32_t p = (int64_t)progress * ANIMATION_NORMALIZED_MAX / EXIT_FRAC;
+      s_car_cur.x   = LERP_P(s_car_phase[0].x, s_car_phase[1].x, p);
+      s_car_cur.y   = s_car_phase[0].y;
+      s_car_cur.w   = s_car_phase[0].w;
+      s_car_cur.rot = s_car_phase[0].rot;
+    } else {
+      int32_t q = ANIMATION_NORMALIZED_MAX - EXIT_FRAC;
+      int32_t p = (int64_t)(progress - EXIT_FRAC) * ANIMATION_NORMALIZED_MAX / q;
+      s_car_cur.x   = LERP_P(s_car_phase[2].x, s_car_phase[3].x, p);
+      s_car_cur.y   = LERP_P(s_car_phase[2].y, s_car_phase[3].y, p);
+      s_car_cur.w   = LERP_P(s_car_phase[2].w, s_car_phase[3].w, p);
+      s_car_cur.rot = LERP_P(s_car_phase[2].rot, s_car_phase[3].rot, p);
+    }
+  } else {
+    s_car_cur.x   = LERP_P(s_car_phase[0].x, s_car_phase[3].x, progress);
+    s_car_cur.y   = LERP_P(s_car_phase[0].y, s_car_phase[3].y, progress);
+    s_car_cur.w   = LERP_P(s_car_phase[0].w, s_car_phase[3].w, progress);
+    s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[3].rot, progress);
+  }
+  layer_mark_dirty(s_car_layer);
+}
+
+static const AnimationImplementation s_car_anim_impl = { .update = car_anim_update };
+
+static void car_layer_update_proc(Layer *layer, GContext *ctx) {
+  if (s_car_cur.w <= 0) return;
+  int cw = (int)s_car_cur.w;
+  int ch = cw * 72 / 161;
+  GRect bounds = layer_get_bounds(layer);
+
+#ifdef PBL_ROUND
+  int car_bottom = (int)s_car_cur.y + ch;
+  if (car_bottom >= bounds.size.h - 30 && (int)s_car_cur.y < bounds.size.h) {
+    draw_road_strip(ctx, bounds);
+  }
+#endif
+
+  if (s_page == PAGE_CHARGE_TIME && s_state.is_charging) {
+    draw_charging_cable(ctx,
+      (int)s_car_cur.x, (int)s_car_cur.y, cw, ch,
+      bounds.size.w, bounds.size.h);
+  }
+
+  draw_icon_car(ctx,
+    GRect((int16_t)s_car_cur.x, (int16_t)s_car_cur.y,
+          (int16_t)cw, (int16_t)ch),
+    s_car_cur.rot, 0);
 }
 
 // ── Page renderers ────────────────────────────────────────────────────────────
@@ -519,7 +627,7 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
   int w = bounds.size.w - INSET_X * 2;
   int lbl_h = 36;
   int gap = 6;
-  int icon_y = CONTENT_Y + 2;
+  int icon_y = CONTENT_Y + (bounds.size.h - CONTENT_Y) / 12;
   int icon_h = bounds.size.h - icon_y - lbl_h - gap - 8;
 
   draw_icon_lock(ctx,
@@ -550,30 +658,9 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
   } else {
     char num[8];
     snprintf(num, sizeof(num), "%d", s_state.charge_min);
-    draw_big_stat(ctx, bounds, num, "minutes\nuntil full", true);
+    draw_big_stat(ctx, bounds, num, "minutes\nuntil full", true, 0, 0);
   }
 
-  // Cable drawn before car so the round cap at port is hidden under the car body
-#ifdef PBL_ROUND
-  {
-    int car_w = bounds.size.w * 62 / 100;
-    int car_h = car_w * 72 / 161;
-    int car_x = bounds.size.w / 2 - car_w / 2;
-    int car_y = bounds.size.h - 22 - car_h;
-    draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w, bounds.size.h);
-    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
-    draw_road_strip(ctx, bounds);
-  }
-#else
-  {
-    int car_w = bounds.size.w * 65 / 100;
-    int car_h = car_w * 72 / 161;
-    int car_x = bounds.size.w / 2 - car_w / 2;
-    int car_y = bounds.size.h - car_h - 2;
-    draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w, bounds.size.h);
-    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
-  }
-#endif
 }
 
 // Draws a % glyph sized to sit beside LECO_42_NUMBERS digits.
@@ -595,7 +682,7 @@ static void draw_percent_glyph(GContext *ctx, GPoint origin, int size) {
 static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   char num[8];
   snprintf(num, sizeof(num), "%d", s_state.charge_pct);
-  draw_big_stat(ctx, bounds, num, "charged", true);
+  draw_big_stat(ctx, bounds, num, "charged", true, 0, 0);
   int digits = s_state.charge_pct >= 100 ? 3 : (s_state.charge_pct >= 10 ? 2 : 1);
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   int digit_w  = 40;
@@ -609,7 +696,6 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   draw_percent_glyph(ctx,
     GPoint(INSET_X + digits * digit_w + 1, glyph_y),
     glyph_sz);
-  draw_car_bottom(ctx, bounds);
 }
 
 static void draw_page_range(GContext *ctx, GRect bounds) {
@@ -619,22 +705,8 @@ static void draw_page_range(GContext *ctx, GRect bounds) {
     : (int)(s_state.range_km * 621 / 1000);
   snprintf(num, sizeof(num), "%d", val);
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometer\nrange" : "mile\nrange", true);
+    s_state.use_metric ? "kilometer\nrange" : "mile\nrange", true, 0, 0);
   draw_mountains(ctx, bounds);
-  {
-    int car_w = bounds.size.w * 55 / 100;
-    int car_h = car_w * 72 / 161;
-    int car_x = bounds.size.w / 2 - car_w / 2;
-#ifdef PBL_ROUND
-    int car_y = bounds.size.h - 22 - car_h;
-#else
-    int car_y = bounds.size.h - car_h - 2;
-#endif
-    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0, 0);
-  }
-#ifdef PBL_ROUND
-  draw_road_strip(ctx, bounds);
-#endif
 }
 
 static void draw_page_odo(GContext *ctx, GRect bounds) {
@@ -643,10 +715,15 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
     ? s_state.odo_km
     : (int)(s_state.odo_km * 621 / 1000);
   snprintf(num, sizeof(num), "%d", val);
+#ifdef PBL_ROUND
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false);
+    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 0, 4);
+#else
+  draw_big_stat(ctx, bounds, num,
+    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 2, 4);
+#endif
 
-  draw_globe_and_car(ctx, bounds);
+  draw_globe(ctx, bounds);
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
@@ -659,7 +736,7 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 8);
   draw_text(ctx, "current location",
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 64, w, 32),
+            GRect(INSET_X, y + 61, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
   int div_y = bounds.size.h - 60;
@@ -910,7 +987,28 @@ static void navigate(int dir) {
   animation_set_duration((Animation*)pa_out, 280);
   animation_set_curve((Animation*)pa_out, AnimationCurveEaseInOut);
 
-  Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, NULL);
+  // Car animation: drive off one edge and onto the next page from the other side
+  bool from_car = is_car_page(s_anim_from_page);
+  bool to_car   = is_car_page(s_page);
+  CarState target = car_target_for_page(s_page, bounds);
+  s_car_drive_mode = (from_car && to_car);
+  if (s_car_drive_mode) {
+    int32_t exit_x  = dir > 0 ? (int32_t)(w + s_car_cur.w + 4) : -(int32_t)(s_car_cur.w + 4);
+    int32_t enter_x = dir > 0 ? -(int32_t)(target.w + 4)       : (int32_t)(w + target.w + 4);
+    s_car_phase[0] = s_car_cur;
+    s_car_phase[1] = (CarState){ exit_x,  s_car_cur.y, s_car_cur.w, s_car_cur.rot };
+    s_car_phase[2] = (CarState){ enter_x, s_car_cur.y, s_car_cur.w, s_car_cur.rot };
+    s_car_phase[3] = target;
+  } else {
+    s_car_phase[0] = s_car_cur;
+    s_car_phase[3] = target;
+  }
+  Animation *car_anim = animation_create();
+  animation_set_implementation(car_anim, &s_car_anim_impl);
+  animation_set_duration(car_anim, 280);
+  animation_set_curve(car_anim, AnimationCurveEaseInOut);
+
+  Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, NULL);
   animation_set_handlers(spawn, (AnimationHandlers){ .stopped = transition_stopped }, NULL);
   animation_schedule(spawn);
 }
@@ -955,6 +1053,12 @@ static void window_load(Window *window) {
   layer_set_update_proc(s_canvas, canvas_update_proc);
   layer_add_child(root, s_canvas);
 
+  // Car animation layer: sits above canvas, below status bar; does not slide
+  s_car_cur = car_target_for_page(s_page, bounds);
+  s_car_layer = layer_create(bounds);
+  layer_set_update_proc(s_car_layer, car_layer_update_proc);
+  layer_add_child(root, s_car_layer);
+
   // Native status bar — auto-updates time, orange bg, white fg, no separator
   s_status_bar = status_bar_layer_create();
   status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_FG);
@@ -977,6 +1081,7 @@ static void window_load(Window *window) {
 
 static void window_unload(Window *window) {
   layer_destroy(s_canvas);
+  layer_destroy(s_car_layer);
   status_bar_layer_destroy(s_status_bar);
   text_layer_destroy(s_page_label);
 }
