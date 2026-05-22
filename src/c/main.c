@@ -207,12 +207,12 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #else
   int ground_y = car_y + car_h;
 #endif
-  // Quadratic bezier: port → hangs vertically down → runs off left edge at ground
-  // morph_p > 0: flatten sy to ground and slide end off-screen left
-  int sx = port_x, sy = CABLE_LERP(port_y, ground_y, morph_p);
-  int mx = port_x, my = ground_y;
+  // Quadratic bezier: port → hangs vertically down → runs off left edge.
+  // morph_p > 0: cable tightens upward and sweeps off-screen left.
+  int sx = port_x, sy = port_y;
+  int mx = port_x, my = CABLE_LERP(ground_y, port_y, morph_p);
   int ex = CABLE_LERP(-4, -(bounds_w + 20), morph_p);
-  int ey = ground_y;
+  int ey = CABLE_LERP(ground_y, port_y, morph_p);
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
   for (int pass = 0; pass < 2; pass++) {
@@ -262,7 +262,14 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int right_bot = locked ? (by + ol) : (by - arm_h / 2);
   GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
 
-  // --- Black outline pass ---
+  // Lock body drawn first; shackle is drawn on top so its white fill
+  // covers the body's top outline at the junction — no seam line.
+  icon_fill(ctx);
+  graphics_fill_rect(ctx, GRect(bx, by, bw, bh), 5, GCornersAll);
+  icon_stroke(ctx);
+  graphics_draw_round_rect(ctx, GRect(bx, by, bw, bh), 5);
+
+  // --- Shackle black outline pass ---
   graphics_context_set_fill_color(ctx, COLOR_DARK);
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, left_bot - arc_cy), 0, GCornerNone);
@@ -275,7 +282,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
                     DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
 
-  // --- White fill pass ---
+  // --- Shackle white fill pass ---
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw/2, arc_cy, arm_sw, left_bot - arc_cy), 0, GCornerNone);
@@ -287,12 +294,6 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
                     DEG_TO_TRIGANGLE(270), DEG_TO_TRIGANGLE(360));
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
                     DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
-
-  // Lock body: white fill + black outline
-  icon_fill(ctx);
-  graphics_fill_rect(ctx, GRect(bx, by, bw, bh), 5, GCornersAll);
-  icon_stroke(ctx);
-  graphics_draw_round_rect(ctx, GRect(bx, by, bw, bh), 5);
 
   // Keyhole: horizontal black line centered in body (matches Figma Frame 9 x=94-106, y=125)
   int kl = bw * 9 / 100; // half-length ≈6px at bw=72
@@ -361,7 +362,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     int amp = mh1/10;
     int dx_rise = 2 * amp * ldx / mh1;
     int dx_fall = 2 * amp * rdx / mh1;
-    int n = 5;
+    int n = 3;
     int xl = px - n * (dx_rise + dx_fall) / 2;
     int zy = py + mh1*40/100;
     GPoint prev = {0, 0};
@@ -380,7 +381,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     int amp = mh2/10;
     int dx_rise = 2 * amp * ldx / mh2;
     int dx_fall = 2 * amp * rdx / mh2;
-    int n = 5;
+    int n = 3;
     int xl = px - n * (dx_rise + dx_fall) / 2;
     int zy = py + mh2*40/100;
     GPoint prev = {0, 0};
@@ -623,9 +624,13 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
     int cur_r  = (int)LERP_P(flat_r,  (int32_t)gr,  s_ground_morph_p);
     graphics_context_set_fill_color(ctx, COLOR_FG);
     graphics_fill_rect(ctx, GRect(0, h - 22, w, 22), 0, GCornerNone);
-    graphics_fill_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
+    // Explicit flat border so it's visible at the start of the morph
     graphics_context_set_stroke_color(ctx, COLOR_DARK);
     graphics_context_set_stroke_width(ctx, 4);
+    graphics_draw_line(ctx, GPoint(0, h - 24), GPoint(w, h - 24));
+    // Morphing circle fill covers the flat line as the globe grows in
+    graphics_context_set_fill_color(ctx, COLOR_FG);
+    graphics_fill_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
     graphics_draw_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
   }
 #ifdef PBL_ROUND

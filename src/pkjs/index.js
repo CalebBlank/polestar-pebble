@@ -349,16 +349,20 @@ function deleteChargePin() {
 Pebble.addEventListener('ready', function() {
   getStoredCreds();
   setTimeout(function() {
-    // Send persisted settings before data
-    var light_text = localStorage.getItem('light_text') === 'true' ? 1 : 0;
+    var metric = localStorage.getItem('use_metric') !== 'false';
+    var light  = localStorage.getItem('light_text') === 'true';
     var settingsMsg = {};
-    settingsMsg[KEY_SETTING_LIGHT_TEXT] = light_text;
-    Pebble.sendAppMessage(settingsMsg, function() {}, function() {});
-    if (!s_username || !s_password) {
-      sendMockData();
-      return;
-    }
-    fetchAndSend();
+    settingsMsg[KEY_SETTING_UNITS]      = metric ? 1 : 0;
+    settingsMsg[KEY_SETTING_LIGHT_TEXT] = light  ? 1 : 0;
+    // Send settings first, then fetch car data in the ACK callback so
+    // the two sendAppMessage calls don't collide.
+    Pebble.sendAppMessage(settingsMsg, function() {
+      if (!s_username || !s_password) { sendMockData(); return; }
+      fetchAndSend();
+    }, function() {
+      if (!s_username || !s_password) { sendMockData(); return; }
+      fetchAndSend();
+    });
   }, 500);
 });
 
@@ -431,12 +435,14 @@ Pebble.addEventListener('webviewclosed', function(e) {
     localStorage.setItem('light_text', light  ? 'true' : 'false');
 
     var msg = {};
-    msg[KEY_SETTING_UNITS]     = metric ? 1 : 0;
+    msg[KEY_SETTING_UNITS]      = metric ? 1 : 0;
     msg[KEY_SETTING_LIGHT_TEXT] = light  ? 1 : 0;
-    Pebble.sendAppMessage(msg, function() {}, function() {});
-
-    // Immediately fetch fresh car data with the updated settings/credentials
-    handleCmd(CMD_REFRESH);
+    // Fetch car data after settings ACK so the two messages don't collide
+    Pebble.sendAppMessage(msg, function() {
+      handleCmd(CMD_REFRESH);
+    }, function() {
+      handleCmd(CMD_REFRESH);
+    });
   } catch(e4) {
     console.log('webviewclosed error: ' + e4);
   }
