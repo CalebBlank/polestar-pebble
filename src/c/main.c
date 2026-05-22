@@ -115,6 +115,21 @@ static CarState          s_car_cur;          // current (animated) state
 static CarState          s_car_phase[4];     // [0]=exit_from [1]=exit_to [2]=enter_from [3]=enter_to
 static bool              s_car_drive_mode;   // true=drive off/on, false=simple lerp
 static Layer            *s_car_layer        = NULL;
+static bool              s_ground_morph     = false;
+static int32_t           s_ground_morph_p   = 0;
+static Layer            *s_affordance_layer = NULL;
+
+// ── Affordance layer ──────────────────────────────────────────────────────────
+
+static bool page_has_affordance(int page) {
+  return page == PAGE_CLIMATE || page == PAGE_LOCK || page == PAGE_LOCATION;
+}
+
+static void affordance_layer_update_proc(Layer *layer, GContext *ctx) {
+  GRect bounds = layer_get_bounds(layer);
+  graphics_context_set_fill_color(ctx, COLOR_DARK);
+  graphics_fill_circle(ctx, GPoint(bounds.size.w, bounds.size.h / 2), 7);
+}
 
 // ── Icon drawing ──────────────────────────────────────────────────────────────
 
@@ -263,7 +278,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, left_bot - arc_cy), 0, GCornerNone);
   graphics_fill_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy), 0, GCornerNone);
+    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy + ol), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, arm_sw + ol * 2);
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
@@ -307,19 +322,22 @@ static void draw_polyline(GContext *ctx, GPoint *pts, int n) {
 static void draw_mountains(GContext *ctx, GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
+  // Peak heights scale with screen height; ratios from emery (228px) reference
+  int mh1 = h * 32 / 100;  // ~73px at h=228
+  int mh2 = h * 40 / 100;  // ~91px at h=228
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
 
   {
     GPoint pts[] = {
-      {-5,             h},
-      {w*27/100,   h-70},
-      {w*28/100,   h-72},
-      {w*29/100,   h-73},
-      {w*30/100,   h-72},
-      {w*31/100,   h-70},
-      {w*62/100,       h},
+      {-5,              h},
+      {w*27/100, h-mh1+3},
+      {w*28/100, h-mh1+1},
+      {w*29/100,   h-mh1},
+      {w*30/100, h-mh1+1},
+      {w*31/100, h-mh1+3},
+      {w*62/100,        h},
     };
     GPathInfo info = { .num_points = 7, .points = pts };
     GPath *path = gpath_create(&info);
@@ -329,13 +347,13 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   }
   {
     GPoint pts[] = {
-      {w*33/100,       h},
-      {w*68/100,   h-87},
-      {w*69/100,   h-90},
-      {w*70/100,   h-91},
-      {w*71/100,   h-90},
-      {w*72/100,   h-87},
-      {w+5,            h},
+      {w*33/100,        h},
+      {w*68/100, h-mh2+4},
+      {w*69/100, h-mh2+1},
+      {w*70/100,   h-mh2},
+      {w*71/100, h-mh2+1},
+      {w*72/100, h-mh2+4},
+      {w+5,             h},
     };
     GPathInfo info = { .num_points = 7, .points = pts };
     GPath *path = gpath_create(&info);
@@ -434,11 +452,6 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 0);
 }
 
-// Semi-circle on the right edge indicating a select-press action menu.
-static void draw_action_affordance(GContext *ctx, GRect bounds) {
-  graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_circle(ctx, GPoint(bounds.size.w, bounds.size.h / 2), 10);
-}
 
 // ── Car animation helpers ─────────────────────────────────────────────────────
 
@@ -489,7 +502,8 @@ static CarState car_target_for_page(int page, GRect bounds) {
 #endif
       break;
     }
-    case PAGE_ODO: {
+    case PAGE_ODO:
+    case PAGE_LOCATION: {
 #if defined(PBL_PLATFORM_EMERY)
       int cw = w * 40 / 100;
 #elif defined(PBL_PLATFORM_CHALK)
@@ -549,6 +563,10 @@ static void car_anim_update(Animation *anim, const AnimationProgress progress) {
     s_car_cur.w   = LERP_P(s_car_phase[0].w, s_car_phase[3].w, progress);
     s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[3].rot, progress);
   }
+  if (s_ground_morph) {
+    s_ground_morph_p = progress;
+    if (progress >= ANIMATION_NORMALIZED_MAX) s_ground_morph = false;
+  }
   layer_mark_dirty(s_car_layer);
 }
 
@@ -561,9 +579,30 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
 
 #ifdef PBL_ROUND
-  int car_bottom = (int)s_car_cur.y + ch;
-  if (car_bottom >= bounds.size.h - 30 && (int)s_car_cur.y < bounds.size.h) {
-    draw_road_strip(ctx, bounds);
+  if (s_ground_morph) {
+    int w = bounds.size.w, h = bounds.size.h;
+    int gr   = w * 52 / 100;
+    int gx   = w * 75 / 100;
+    int gy   = h + gr / 4;
+    int32_t flat_r  = (int32_t)h * 8;
+    int32_t flat_cx = w / 2;
+    int32_t flat_cy = (int32_t)(h - 22) + flat_r;
+    int cur_cx = (int)LERP_P(flat_cx, (int32_t)gx, s_ground_morph_p);
+    int cur_cy = (int)LERP_P(flat_cy, (int32_t)gy, s_ground_morph_p);
+    int cur_r  = (int)LERP_P(flat_r,  (int32_t)gr,  s_ground_morph_p);
+    // Road strip rect as flat base throughout the morph
+    graphics_context_set_fill_color(ctx, COLOR_FG);
+    graphics_fill_rect(ctx, GRect(0, h - 22, w, 22), 0, GCornerNone);
+    // Growing dome fill + curving outline
+    graphics_fill_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
+    graphics_context_set_stroke_color(ctx, COLOR_DARK);
+    graphics_context_set_stroke_width(ctx, 4);
+    graphics_draw_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
+  } else {
+    int car_bottom = (int)s_car_cur.y + ch;
+    if (car_bottom >= bounds.size.h - 30 && (int)s_car_cur.y < bounds.size.h) {
+      draw_road_strip(ctx, bounds);
+    }
   }
 #endif
 
@@ -620,7 +659,6 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
             GRect(INSET_X, div_y + 8, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 #endif
-  draw_action_affordance(ctx, bounds);
 }
 
 static void draw_page_lock(GContext *ctx, GRect bounds) {
@@ -639,7 +677,6 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, icon_y + icon_h + gap, w, lbl_h),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 0);
-  draw_action_affordance(ctx, bounds);
 }
 
 static void draw_page_charge_time(GContext *ctx, GRect bounds) {
@@ -779,7 +816,7 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GRect(INSET_X, div_y + 8, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 #endif
-  draw_action_affordance(ctx, bounds);
+  draw_globe(ctx, bounds);
 }
 
 // ── Canvas update ─────────────────────────────────────────────────────────────
@@ -954,6 +991,18 @@ static void transition_stopped(Animation *anim, bool finished, void *context) {
   }
   GRect r = layer_get_bounds(window_get_root_layer(s_window));
   layer_set_frame(s_canvas, r);
+
+  // Slide affordance back in from the right if new page has one
+  if (page_has_affordance(s_page)) {
+    GRect aff_start = GRect(r.size.w, 0, r.size.w, r.size.h);
+    GRect aff_end   = GRect(0, 0, r.size.w, r.size.h);
+    layer_set_frame(s_affordance_layer, aff_start);
+    PropertyAnimation *pa_in = property_animation_create_layer_frame(
+      s_affordance_layer, NULL, &aff_end);
+    animation_set_duration((Animation*)pa_in, 180);
+    animation_set_curve((Animation*)pa_in, AnimationCurveEaseOut);
+    animation_schedule((Animation*)pa_in);
+  }
 }
 
 static void navigate(int dir) {
@@ -992,6 +1041,8 @@ static void navigate(int dir) {
   bool to_car   = is_car_page(s_page);
   CarState target = car_target_for_page(s_page, bounds);
   s_car_drive_mode = (from_car && to_car);
+  s_ground_morph   = (s_car_drive_mode && s_anim_from_page == PAGE_RANGE && s_page == PAGE_ODO);
+  s_ground_morph_p = 0;
   if (s_car_drive_mode) {
     int32_t exit_x  = dir > 0 ? (int32_t)(w + s_car_cur.w + 4) : -(int32_t)(s_car_cur.w + 4);
     int32_t enter_x = dir > 0 ? -(int32_t)(target.w + 4)       : (int32_t)(w + target.w + 4);
@@ -1000,15 +1051,30 @@ static void navigate(int dir) {
     s_car_phase[2] = (CarState){ enter_x, s_car_cur.y, s_car_cur.w, s_car_cur.rot };
     s_car_phase[3] = target;
   } else {
-    s_car_phase[0] = s_car_cur;
-    s_car_phase[3] = target;
+    if (!from_car && to_car) {
+      // Car drives in from the navigation edge (e.g. lock → charge_time)
+      int32_t enter_x = dir > 0
+        ? -(int32_t)(target.w + 4)
+        : (int32_t)(w + target.w + 4);
+      s_car_phase[0] = (CarState){ enter_x, target.y, target.w, target.rot };
+      s_car_phase[3] = target;
+    } else {
+      s_car_phase[0] = s_car_cur;
+      s_car_phase[3] = target;
+    }
   }
   Animation *car_anim = animation_create();
   animation_set_implementation(car_anim, &s_car_anim_impl);
   animation_set_duration(car_anim, 280);
   animation_set_curve(car_anim, AnimationCurveEaseInOut);
 
-  Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, NULL);
+  // Affordance slides right during every transition; slides back in transition_stopped
+  GRect aff_off = GRect(w, 0, w, h);
+  PropertyAnimation *pa_aff = property_animation_create_layer_frame(s_affordance_layer, NULL, &aff_off);
+  animation_set_duration((Animation*)pa_aff, 160);
+  animation_set_curve((Animation*)pa_aff, AnimationCurveEaseIn);
+
+  Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, (Animation*)pa_aff, NULL);
   animation_set_handlers(spawn, (AnimationHandlers){ .stopped = transition_stopped }, NULL);
   animation_schedule(spawn);
 }
@@ -1059,6 +1125,13 @@ static void window_load(Window *window) {
   layer_set_update_proc(s_car_layer, car_layer_update_proc);
   layer_add_child(root, s_car_layer);
 
+  // Affordance layer: persistent semicircle on right edge, slides right during transitions
+  GRect aff_frame = page_has_affordance(s_page)
+    ? bounds : GRect(bounds.size.w, 0, bounds.size.w, bounds.size.h);
+  s_affordance_layer = layer_create(aff_frame);
+  layer_set_update_proc(s_affordance_layer, affordance_layer_update_proc);
+  layer_add_child(root, s_affordance_layer);
+
   // Native status bar — auto-updates time, orange bg, white fg, no separator
   s_status_bar = status_bar_layer_create();
   status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_FG);
@@ -1082,6 +1155,7 @@ static void window_load(Window *window) {
 static void window_unload(Window *window) {
   layer_destroy(s_canvas);
   layer_destroy(s_car_layer);
+  layer_destroy(s_affordance_layer);
   status_bar_layer_destroy(s_status_bar);
   text_layer_destroy(s_page_label);
 }
