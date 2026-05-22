@@ -426,8 +426,8 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   (void)large;  // font size now uniform across all pages
 
   graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49),
-            GRect(INSET_X, y, w, 60),
+  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
+            GRect(INSET_X, y, w, 52),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, y + 44, w, 70),
@@ -473,10 +473,10 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y + 44, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = bounds.size.h - 44;
+  int div_y = bounds.size.h - 60;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
-  graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
+  graphics_draw_line(ctx, GPoint(INSET_X + 8, div_y), GPoint(bounds.size.w - INSET_X - 8, div_y));
 
   char temp_buf[24];
   if (s_state.use_metric) {
@@ -631,10 +631,10 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y + 80, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = bounds.size.h - 44;
+  int div_y = bounds.size.h - 60;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
-  graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
+  graphics_draw_line(ctx, GPoint(INSET_X + 8, div_y), GPoint(bounds.size.w - INSET_X - 8, div_y));
 
   char dist_buf[32];
   if (s_state.distance_m < 0) {
