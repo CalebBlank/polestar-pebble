@@ -55,7 +55,7 @@
 // ── Layout ────────────────────────────────────────────────────────────────────
 // Gabbro has rx=18 rounded corners — need wider inset to stay inside the mask
 #ifdef PBL_ROUND
-  #define INSET_X  26
+  #define INSET_X  34
 #elif defined(PBL_PLATFORM_GABBRO)
   #define INSET_X  18
 #else
@@ -374,7 +374,11 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
   #undef GP
 
   // Car at 25° LEFT from top of globe, tilted -25° CCW (front/right tilts up)
+#if defined(PBL_PLATFORM_EMERY)
+  int car_w = w * 30 / 100;
+#else
   int car_w = w * 42 / 100;
+#endif
   int car_h = car_w * 72 / 161;
   int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
   int32_t rot = TRIG_MAX_ANGLE * 335 / 360;  // -25° CCW
