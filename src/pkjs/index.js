@@ -291,7 +291,10 @@ function sendMockData() {
   msg[KEY_STATE_ODO_KM]      = 12305;
   msg[KEY_STATE_LOCATION]    = '136 S Ash St\nPalatine, IL';
   msg[KEY_STATE_OUTSIDE_TEMP]= 60;
-  msg[KEY_SETTING_UNITS]     = 1;
+  var metric = localStorage.getItem('use_metric') !== 'false';
+  var light  = localStorage.getItem('light_text') === 'true';
+  msg[KEY_SETTING_UNITS]      = metric ? 1 : 0;
+  msg[KEY_SETTING_LIGHT_TEXT] = light  ? 1 : 0;
   msg[KEY_STATE_DISTANCE_M]  = 2200;
   Pebble.sendAppMessage(msg, function() {}, function() {});
 }

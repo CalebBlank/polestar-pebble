@@ -210,9 +210,9 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   // Quadratic bezier: port → hangs vertically down → runs off left edge.
   // morph_p > 0: cable tightens upward and sweeps off-screen left.
   int sx = port_x, sy = port_y;
-  int mx = port_x, my = CABLE_LERP(ground_y, port_y, morph_p);
+  int mx = port_x, my = ground_y;
   int ex = CABLE_LERP(-4, -(bounds_w + 20), morph_p);
-  int ey = CABLE_LERP(ground_y, port_y, morph_p);
+  int ey = ground_y;
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
   for (int pass = 0; pass < 2; pass++) {
@@ -274,7 +274,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, left_bot - arc_cy), 0, GCornerNone);
   graphics_fill_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy + ol), 0, GCornerNone);
+    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, arm_sw + ol * 2);
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
@@ -359,7 +359,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   {
     int px = w*29/100, py = h-mh1;
     int ldx = px+5, rdx = w*33/100;
-    int amp = mh1/10;
+    int amp = mh1/14;
     int dx_rise = 2 * amp * ldx / mh1;
     int dx_fall = 2 * amp * rdx / mh1;
     int n = 3;
@@ -378,7 +378,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   {
     int px = w*70/100, py = h-mh2;
     int ldx = w*37/100, rdx = w*30/100+5;
-    int amp = mh2/10;
+    int amp = mh2/14;
     int dx_rise = 2 * amp * ldx / mh2;
     int dx_fall = 2 * amp * rdx / mh2;
     int n = 3;
@@ -1050,6 +1050,7 @@ static void transition_stopped(Animation *anim, bool finished, void *context) {
   }
   GRect r = layer_get_bounds(window_get_root_layer(s_window));
   layer_set_frame(s_canvas, r);
+  layer_mark_dirty(s_car_layer);
 }
 
 static void navigate(int dir) {
