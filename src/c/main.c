@@ -21,6 +21,7 @@
 #define KEY_SETTING_UNITS      10
 #define KEY_SETTING_API_KEY    11
 #define KEY_ERROR              12
+#define KEY_STATE_DISTANCE_M   13
 
 #define CMD_REFRESH        1
 #define CMD_TOGGLE_LOCK    2
@@ -39,10 +40,17 @@
 #define PAGE_COUNT       7
 
 // ── Colors ────────────────────────────────────────────────────────────────────
-#define COLOR_BG    GColorChromeYellow
-#define COLOR_FG    GColorWhite
-#define COLOR_DARK  GColorBlack
-#define COLOR_DIM   GColorLightGray
+#ifdef PBL_COLOR
+  #define COLOR_BG    GColorChromeYellow
+  #define COLOR_FG    GColorWhite
+  #define COLOR_DARK  GColorBlack
+  #define COLOR_DIM   GColorLightGray
+#else
+  #define COLOR_BG    GColorBlack
+  #define COLOR_FG    GColorWhite
+  #define COLOR_DARK  GColorBlack
+  #define COLOR_DIM   GColorWhite
+#endif
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 // Gabbro has rx=18 rounded corners — need wider inset to stay inside the mask
@@ -56,7 +64,7 @@
 // On round screens the circle is too narrow near the top to fit INSET_X=22;
 // drop content lower to where the circle left edge ≈ INSET_X.
 #ifdef PBL_ROUND
-  #define CONTENT_Y 60
+  #define CONTENT_Y 44
 #else
   #define CONTENT_Y (STATUS_BAR_LAYER_HEIGHT + 2)
 #endif
@@ -74,6 +82,7 @@ static struct {
   bool is_charging;
   bool use_metric;
   bool error;
+  int  distance_m;
 } s_state = {
   .locked       = true,
   .climate_on   = false,
@@ -86,6 +95,7 @@ static struct {
   .is_charging  = true,
   .use_metric   = false,
   .error        = false,
+  .distance_m   = -1,
 };
 
 static int               s_page = PAGE_CLIMATE;
@@ -175,14 +185,14 @@ static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle) {
   graphics_draw_circle(ctx, GPoint(rear_wx,  rear_wy),  wheel_r);
 }
 
-// Cable hangs from the charge port (front/right of car) down to ground,
-// then runs off the right edge toward the charger (off-screen).
+// Cable hangs from the charge port (rear/left of car) down to ground,
+// then runs off the left edge toward the charger (off-screen).
 static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
                                 int car_w, int car_h, int bounds_w, int bounds_h) {
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
-  // Charge port: front = right side of car
-  int port_x  = car_x + 150 * car_w / 161;
+  // Charge port: rear = left side of car
+  int port_x  = car_x + 8 * car_w / 161;
   int port_y  = car_y + 32 * body_h / 54;
   // Ground level: bottom of wheels (also top of road strip on round screens)
 #ifdef PBL_ROUND
@@ -190,11 +200,10 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #else
   int ground_y = car_y + car_h;
 #endif
-  // Quadratic bezier: port → hangs vertically down → runs to right wall at ground
-  // Control point directly below port at ground forces the cable to drop first
-  int sx = port_x,     sy = port_y;    // start at port
-  int mx = port_x - 4, my = ground_y; // control: below port (slight leftward lean = natural sag)
-  int ex = bounds_w + 4, ey = ground_y; // end: right wall at ground
+  // Quadratic bezier: port → hangs vertically down → runs off left edge at ground
+  int sx = port_x, sy = port_y;    // start at port
+  int mx = port_x, my = ground_y; // control: directly below port at ground
+  int ex = -4,     ey = ground_y; // end: off left edge at ground
 
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 4);
@@ -238,7 +247,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int arc_cy = by - arm_h;
 
   // Shackle: draw black outline layer first, then white fill on top.
-  int ol = 3;  // outline thickness in px
+  int ol = 4;  // outline thickness in px
   GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
 
   // --- Black outline pass ---
@@ -342,14 +351,14 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_circle(ctx, GPoint(gx, gy), gr);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 3);
+  graphics_context_set_stroke_width(ctx, 4);
   graphics_draw_circle(ctx, GPoint(gx, gy), gr);
 
   // Globe lines from Globe.svg (303×303, center 152,152, radius 149)
   // Screen point: gx + (sx-152)*gr/149, gy + (sy-152)*gr/149
   #define GP(sx,sy) GPoint((int16_t)(gx+((sx)-152)*gr/149), (int16_t)(gy+((sy)-152)*gr/149))
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 2);
+  graphics_context_set_stroke_width(ctx, 4);
   { GPoint p[] = { GP(28,68), GP(62,97), GP(65,126), GP(90,150), GP(93,182), GP(27,228) };
     draw_polyline(ctx, p, 6); }
   { GPoint p[] = { GP(157,3), GP(156,36), GP(126,60), GP(125,90), GP(202,160), GP(266,116), GP(264,84), GP(279,75) };
@@ -360,13 +369,13 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
     draw_polyline(ctx, p, 4); }
   #undef GP
 
-  // Car at 25° from top of globe, tilted -25° (front/right tilts up)
+  // Car at 25° LEFT from top of globe, tilted -25° CCW (front/right tilts up)
   int car_w = w * 32 / 100;   // ~83px at 260, ~64px at 200
-  int car_h = car_w * 42 / 80;
+  int car_h = car_w * 72 / 161;
   int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
   int32_t rot = TRIG_MAX_ANGLE * 335 / 360;  // -25° CCW
-  // Surface point at 25° from globe top
-  int surf_x = gx + (int32_t)gr * sin_lookup(a25) / TRIG_MAX_RATIO;
+  // Surface point at 25° LEFT from globe top
+  int surf_x = gx - (int32_t)gr * sin_lookup(a25) / TRIG_MAX_RATIO;
   int surf_y = gy - (int32_t)gr * cos_lookup(a25) / TRIG_MAX_RATIO;
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
@@ -414,11 +423,11 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int lh = large ? 80 : 68;
 
   graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
-            GRect(INSET_X, y, w, 56),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
+  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49),
+            GRect(INSET_X, y, w, 60),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, INSET_X);
   draw_text(ctx, label, lf,
-            GRect(INSET_X, y + 56, w, lh),
+            GRect(INSET_X, y + 60, w, lh),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
 }
 
@@ -426,16 +435,16 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
 static void draw_car_bottom(GContext *ctx, GRect bounds) {
 #ifdef PBL_ROUND
   int car_w = bounds.size.w * 62 / 100;
-  int car_h = car_w * 64 / 160;
+  int car_h = car_w * 72 / 161;
   int car_x = bounds.size.w / 2 - car_w / 2;
-  int car_y = bounds.size.h - car_h - 14;
+  int car_y = bounds.size.h - 22 - car_h;
   draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
   draw_road_strip(ctx, bounds);
 #else
   int car_w = MIN(bounds.size.w - INSET_X * 2, 150);
-  int car_h = car_w * 62 / 150;
+  int car_h = car_w * 72 / 161;
   int car_x = bounds.size.w / 2 - car_w / 2;
-  draw_icon_car(ctx, GRect(car_x, bounds.size.h - car_h - 6, car_w, car_h), 0);
+  draw_icon_car(ctx, GRect(car_x, bounds.size.h - car_h - 2, car_w, car_h), 0);
 #endif
 }
 
@@ -509,14 +518,13 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
     draw_big_stat(ctx, bounds, num, "minutes\nuntil full", true);
   }
 
-  // Car positioned so charge port is ~35px inside the right edge — cable visible
+  // Car positioned so rear/left port is ~35px from left edge — cable runs off left
 #ifdef PBL_ROUND
   {
     int car_w = bounds.size.w * 62 / 100;
-    int car_h = car_w * 64 / 160;
-    // port_x = car_x + 150*car_w/161; solve for car_x so port = bounds_w - 35
-    int car_x = bounds.size.w - 35 - 150 * car_w / 161;
-    int car_y = bounds.size.h - car_h - 14;
+    int car_h = car_w * 72 / 161;
+    int car_x = 35 - 8 * car_w / 161;
+    int car_y = bounds.size.h - 22 - car_h;
     draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
     draw_road_strip(ctx, bounds);
     draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w, bounds.size.h);
@@ -524,9 +532,9 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
 #else
   {
     int car_w = bounds.size.w * 65 / 100;
-    int car_h = car_w * 62 / 150;
-    int car_x = bounds.size.w - 28 - 150 * car_w / 161;
-    int car_y = bounds.size.h - car_h - 6;
+    int car_h = car_w * 72 / 161;
+    int car_x = 35 - 8 * car_w / 161;
+    int car_y = bounds.size.h - car_h - 2;
     draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
     draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w, bounds.size.h);
   }
@@ -553,11 +561,11 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   char num[8];
   snprintf(num, sizeof(num), "%d", s_state.charge_pct);
   draw_big_stat(ctx, bounds, num, "charged", true);
-  // LECO_42_NUMBERS digits are ~26px wide each; draw % glyph after the number
+  // ROBOTO_BOLD_SUBSET_49 digits are ~30px wide each; draw % glyph after the number
   int digits   = s_state.charge_pct >= 100 ? 3 : (s_state.charge_pct >= 10 ? 2 : 1);
-  int glyph_sz = 28;
+  int glyph_sz = 30;
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * 26 + 4, CONTENT_Y + 8),
+    GPoint(INSET_X + digits * 30 + 4, CONTENT_Y + 6),
     glyph_sz);
   draw_car_bottom(ctx, bounds);
 }
@@ -573,9 +581,13 @@ static void draw_page_range(GContext *ctx, GRect bounds) {
   draw_mountains(ctx, bounds);
   {
     int car_w = bounds.size.w * 55 / 100;
-    int car_h = car_w * 54 / 140;
+    int car_h = car_w * 72 / 161;
     int car_x = bounds.size.w / 2 - car_w / 2;
-    int car_y = bounds.size.h - car_h - 14;
+#ifdef PBL_ROUND
+    int car_y = bounds.size.h - 22 - car_h;
+#else
+    int car_y = bounds.size.h - car_h - 2;
+#endif
     draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h), 0);
   }
 #ifdef PBL_ROUND
@@ -601,11 +613,41 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, s_state.location,
             fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-            GRect(INSET_X, y, w, 100),
+            GRect(INSET_X, y, w, 80),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 5);
   draw_text(ctx, "current location",
             fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
-            GRect(INSET_X, y + 100, w, 28),
+            GRect(INSET_X, y + 80, w, 24),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
+
+  int div_y = y + 80 + 24 + 4;
+  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
+
+  char dist_buf[32];
+  if (s_state.distance_m < 0) {
+    snprintf(dist_buf, sizeof(dist_buf), "distance unknown");
+  } else if (s_state.use_metric) {
+    if (s_state.distance_m < 1000) {
+      snprintf(dist_buf, sizeof(dist_buf), "%d m away", s_state.distance_m);
+    } else {
+      snprintf(dist_buf, sizeof(dist_buf), "%d.%d km away",
+               s_state.distance_m / 1000, (s_state.distance_m % 1000) / 100);
+    }
+  } else {
+    int ft = (int)((int64_t)s_state.distance_m * 3281 / 1000);
+    if (ft < 5280) {
+      snprintf(dist_buf, sizeof(dist_buf), "%d ft away", ft);
+    } else {
+      int mi_whole = ft / 5280;
+      int mi_frac  = (ft % 5280) * 10 / 5280;
+      snprintf(dist_buf, sizeof(dist_buf), "%d.%d mi away", mi_whole, mi_frac);
+    }
+  }
+  draw_text(ctx, dist_buf,
+            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
+            GRect(INSET_X, div_y + 8, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 5);
 }
 
@@ -668,6 +710,7 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, KEY_SETTING_UNITS)))      s_state.use_metric   = (bool)t->value->int32;
   if ((t = dict_find(iter, KEY_STATE_LOCATION)))
     snprintf(s_state.location, sizeof(s_state.location), "%s", t->value->cstring);
+  if ((t = dict_find(iter, KEY_STATE_DISTANCE_M))) s_state.distance_m = t->value->int32;
 
   layer_mark_dirty(s_canvas);
 }

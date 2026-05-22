@@ -28,7 +28,8 @@
       "STATE_IS_CHARGING": 9,
       "SETTING_UNITS": 10,
       "SETTING_API_KEY": 11,
-      "ERROR": 12
+      "ERROR": 12,
+      "STATE_DISTANCE_M": 13
     }
   }
 }

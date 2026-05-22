@@ -12,6 +12,7 @@ var KEY_STATE_IS_CHARGING  = 9;
 var KEY_SETTING_UNITS    = 10;
 var KEY_SETTING_API_KEY  = 11;
 var KEY_ERROR            = 12;
+var KEY_STATE_DISTANCE_M = 13;
 
 var CMD_REFRESH          = 1;
 var CMD_TOGGLE_LOCK      = 2;
@@ -141,6 +142,28 @@ function reverseGeocode(lat, lon, callback) {
   xhr.send();
 }
 
+// ── Distance ──────────────────────────────────────────────────────────────────
+function haversineM(lat1, lon1, lat2, lon2) {
+  var R = 6371000;
+  var dLat = (lat2 - lat1) * Math.PI / 180;
+  var dLon = (lon2 - lon1) * Math.PI / 180;
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+function sendDistance() {
+  navigator.geolocation.getCurrentPosition(function(pos) {
+    if (s_car_lat || s_car_lng) {
+      var d = haversineM(pos.coords.latitude, pos.coords.longitude, s_car_lat, s_car_lng);
+      var msg = {};
+      msg[KEY_STATE_DISTANCE_M] = d;
+      Pebble.sendAppMessage(msg, function() {}, function() {});
+    }
+  }, function() {}, { timeout: 10000, maximumAge: 60000 });
+}
+
 // ── Fetch all state ───────────────────────────────────────────────────────────
 function fetchAndSend() {
   getStoredCreds();
@@ -182,6 +205,7 @@ function fetchAndSend() {
           msg[KEY_STATE_LOCATION]     = location_str;
           // outside temp comes from climate data if available
           Pebble.sendAppMessage(msg, function() {}, function() {});
+          sendDistance();
         }
 
         if (lat && lon) {
@@ -258,6 +282,7 @@ function sendMockData() {
   msg[KEY_STATE_LOCATION]    = '136 S Ash St, Palatine IL';
   msg[KEY_STATE_OUTSIDE_TEMP]= 60;
   msg[KEY_SETTING_UNITS]     = 1;
+  msg[KEY_STATE_DISTANCE_M]  = 2200;
   Pebble.sendAppMessage(msg, function() {}, function() {});
 }
 
