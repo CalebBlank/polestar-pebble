@@ -55,7 +55,7 @@
 // ── Layout ────────────────────────────────────────────────────────────────────
 // Gabbro has rx=18 rounded corners — need wider inset to stay inside the mask
 #ifdef PBL_ROUND
-  #define INSET_X  22
+  #define INSET_X  26
 #elif defined(PBL_PLATFORM_GABBRO)
   #define INSET_X  18
 #else
@@ -374,7 +374,7 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
   #undef GP
 
   // Car at 25° LEFT from top of globe, tilted -25° CCW (front/right tilts up)
-  int car_w = w * 38 / 100;   // slightly larger than other pages
+  int car_w = w * 42 / 100;
   int car_h = car_w * 72 / 161;
   int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
   int32_t rot = TRIG_MAX_ANGLE * 335 / 360;  // -25° CCW
@@ -386,7 +386,7 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
   // Place so wheel-center row (body_h from rect top) sits AT surface point
   draw_icon_car(ctx,
     GRect(surf_x - car_w / 2, surf_y - body_h, car_w, car_h),
-    rot, MAX(car_h / 6, 8));
+    rot, 0);
 }
 
 // On round watches, draw a white road strip with black top edge at screen bottom.
@@ -426,8 +426,8 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   (void)large;  // font size now uniform across all pages
 
   graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
-            GRect(INSET_X, y, w, 52),
+  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_ROBOTO_BOLD_SUBSET_49),
+            GRect(INSET_X, y, w, 60),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, y + 44, w, 70),
@@ -451,6 +451,12 @@ static void draw_car_bottom(GContext *ctx, GRect bounds) {
 #endif
 }
 
+// Semi-circle on the right edge indicating a select-press action menu.
+static void draw_action_affordance(GContext *ctx, GRect bounds) {
+  graphics_context_set_fill_color(ctx, COLOR_DARK);
+  graphics_fill_circle(ctx, GPoint(bounds.size.w, bounds.size.h / 2), 10);
+}
+
 // ── Page renderers ────────────────────────────────────────────────────────────
 
 static void draw_page_climate(GContext *ctx, GRect bounds) {
@@ -467,7 +473,7 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y + 44, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = y + 44 + 36 + 8;
+  int div_y = bounds.size.h - 44;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
   graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
@@ -481,7 +487,8 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
   }
   draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, div_y + 8, w, 36),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 8);
+  draw_action_affordance(ctx, bounds);
 }
 
 static void draw_page_lock(GContext *ctx, GRect bounds) {
@@ -500,6 +507,7 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, icon_y + icon_h + gap, w, lbl_h),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 0);
+  draw_action_affordance(ctx, bounds);
 }
 
 static void draw_page_charge_time(GContext *ctx, GRect bounds) {
@@ -623,7 +631,7 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y + 80, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = y + 80 + 32 + 4;
+  int div_y = bounds.size.h - 44;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
   graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
@@ -651,7 +659,8 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
   draw_text(ctx, dist_buf,
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, div_y + 8, w, 36),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 8);
+  draw_action_affordance(ctx, bounds);
 }
 
 // ── Canvas update ─────────────────────────────────────────────────────────────
