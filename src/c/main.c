@@ -25,6 +25,7 @@
 #define KEY_SETTING_LIGHT_TEXT 14
 
 #define PERSIST_KEY_LIGHT_TEXT 1
+#define PERSIST_KEY_USE_METRIC 2
 
 #define CMD_REFRESH        1
 #define CMD_TOGGLE_LOCK    2
@@ -209,9 +210,13 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #endif
   // Quadratic bezier: port → hangs vertically down → runs off left edge.
   // morph_p > 0: cable tightens upward and sweeps off-screen left.
-  int sx = port_x, sy = port_y;
-  int mx = port_x, my = ground_y;
-  int ex = CABLE_LERP(-4, -(bounds_w + 20), morph_p);
+  // Sweep the entire cable off the left edge during the page transition
+  int32_t cable_sweep = CABLE_LERP(0, -(bounds_w + car_w + 20), morph_p);
+  int sx = port_x + (int)cable_sweep;
+  int sy = port_y;
+  int mx = sx;
+  int my = ground_y;
+  int ex = (int)(-4 + cable_sweep);
   int ey = ground_y;
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
@@ -242,7 +247,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int max_bw = r.size.h * 5 / 7;
   int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw);
   int bh     = bw * 8 / 9;    // 72→64px (matches Figma body height exactly)
-  int arm_h  = bw * 29 / 100; // 72→21px (arc center to body top)
+  int arm_h  = bw * 20 / 100; // shorter shackle arms
   int arc_r  = bw * 22 / 100; // 72→16px (center-of-stroke shackle radius)
   int arm_sw = bw * 19 / 100; // 72→14px (shackle stroke width, Figma outer-inner)
   arm_sw = MAX(arm_sw, 4);
@@ -274,7 +279,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, left_bot - arc_cy), 0, GCornerNone);
   graphics_fill_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy), 0, GCornerNone);
+    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy + (locked ? 0 : ol)), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, arm_sw + ol * 2);
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
@@ -296,11 +301,15 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
                     DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
 
   // Keyhole: horizontal black line centered in body (matches Figma Frame 9 x=94-106, y=125)
-  int kl = bw * 9 / 100; // half-length ≈6px at bw=72
+  int kl = bw * 9 / 100;
   int ky = by + bh * 52 / 100;
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, MAX(arm_sw * 2 / 5, 3));
-  graphics_draw_line(ctx, GPoint(cx - kl, ky), GPoint(cx + kl, ky));
+  if (locked) {
+    graphics_draw_line(ctx, GPoint(cx, ky - kl), GPoint(cx, ky + kl));
+  } else {
+    graphics_draw_line(ctx, GPoint(cx - kl, ky), GPoint(cx + kl, ky));
+  }
 }
 
 
@@ -359,12 +368,12 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   {
     int px = w*29/100, py = h-mh1;
     int ldx = px+5, rdx = w*33/100;
-    int amp = mh1/14;
+    int amp = mh1/12;
     int dx_rise = 2 * amp * ldx / mh1;
     int dx_fall = 2 * amp * rdx / mh1;
     int n = 3;
     int xl = px - n * (dx_rise + dx_fall) / 2;
-    int zy = py + mh1*40/100;
+    int zy = py + mh1*45/100;
     GPoint prev = {0, 0};
     int x = xl, y = zy + amp;
     for (int i = 0; i <= 2 * n; i++) {
@@ -378,12 +387,12 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   {
     int px = w*70/100, py = h-mh2;
     int ldx = w*37/100, rdx = w*30/100+5;
-    int amp = mh2/14;
+    int amp = mh2/12;
     int dx_rise = 2 * amp * ldx / mh2;
     int dx_fall = 2 * amp * rdx / mh2;
     int n = 3;
     int xl = px - n * (dx_rise + dx_fall) / 2;
-    int zy = py + mh2*40/100;
+    int zy = py + mh2*45/100;
     GPoint prev = {0, 0};
     int x = xl, y = zy + amp;
     for (int i = 0; i <= 2 * n; i++) {
@@ -477,9 +486,18 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int x = INSET_X + x_extra;
   int w = bounds.size.w - INSET_X * 2 - x_extra;
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
-  GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_60_NUMBERS_AM_PM : FONT_KEY_LECO_42_NUMBERS);
-  int num_h  = large ? 68 : 52;
-  int lbl_y  = y + (large ? 60 : 44);
+  GFont num_font;
+  int num_h, lbl_y;
+  if (large) {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_60_NUMBERS_AM_PM);
+    num_h = 68; lbl_y = y + 60;
+  } else if (strlen(number) > 5) {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
+    num_h = 36; lbl_y = y + 28;
+  } else {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+    num_h = 52; lbl_y = y + 44;
+  }
 #else
   GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
   int num_h  = large ? 52 : 36;
@@ -588,6 +606,23 @@ static void car_anim_update(Animation *anim, const AnimationProgress progress) {
   s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[1].rot, progress);
   if (s_ground_morph) {
     s_ground_morph_p = progress;
+    // Keep car grounded (flat bottom) for first 75% of morph, then blend
+    // smoothly to the ODO globe position in the final quarter.
+    GRect bnd = layer_get_bounds(window_get_root_layer(s_window));
+    int ch = (int)s_car_cur.w * 72 / 161;
+    int32_t N = ANIMATION_NORMALIZED_MAX;
+    int flat_y = bnd.size.h - ch - 2;
+    if (progress <= N * 3 / 4) {
+      if ((int)s_car_cur.y < flat_y) s_car_cur.y = (int16_t)flat_y;
+      s_car_cur.rot = 0;
+    } else {
+      int32_t cw_3q = LERP_P(s_car_phase[0].w, s_car_phase[1].w, N * 3 / 4);
+      int ch_3q  = (int)cw_3q * 72 / 161;
+      int y_at_3q = bnd.size.h - ch_3q - 2;
+      int32_t sub_p = MIN((int32_t)(progress - N * 3 / 4) * 4, N);
+      s_car_cur.y   = (int16_t)LERP_P(y_at_3q, s_car_phase[1].y, sub_p);
+      s_car_cur.rot = (int32_t)LERP_P(0, s_car_phase[1].rot, sub_p);
+    }
   }
   if (s_anim_from_page == PAGE_CHARGE_TIME) {
     s_cable_anim_p = progress;
@@ -603,7 +638,7 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   // On non-sliding layer so the hint doesn't sweep across screen during transitions
   if (s_page == PAGE_CLIMATE || s_page == PAGE_LOCK || s_page == PAGE_LOCATION) {
     graphics_context_set_fill_color(ctx, COLOR_DARK);
-    graphics_fill_circle(ctx, GPoint(bounds.size.w + 6, bounds.size.h / 2), 16);
+    graphics_fill_circle(ctx, GPoint(bounds.size.w + 10, bounds.size.h / 2), 16);
   }
 
   if (s_car_cur.w <= 0) return;
@@ -790,7 +825,7 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
   int val = s_state.use_metric
     ? s_state.odo_km
     : (int)(s_state.odo_km * 621 / 1000);
-  snprintf(num, sizeof(num), "%d", val);
+  snprintf(num, sizeof(num), "%07d", val);
 #ifdef PBL_ROUND
   draw_big_stat(ctx, bounds, num,
     s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 0, 4);
@@ -917,7 +952,10 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, KEY_STATE_ODO_KM)))       s_state.odo_km       = t->value->int32;
   if ((t = dict_find(iter, KEY_STATE_OUTSIDE_TEMP))) s_state.outside_temp = t->value->int32;
   if ((t = dict_find(iter, KEY_STATE_IS_CHARGING)))  s_state.is_charging  = (bool)t->value->int32;
-  if ((t = dict_find(iter, KEY_SETTING_UNITS)))      s_state.use_metric   = (bool)t->value->int32;
+  if ((t = dict_find(iter, KEY_SETTING_UNITS))) {
+    s_state.use_metric = (bool)t->value->int32;
+    persist_write_bool(PERSIST_KEY_USE_METRIC, s_state.use_metric);
+  }
   if ((t = dict_find(iter, KEY_STATE_LOCATION)))
     snprintf(s_state.location, sizeof(s_state.location), "%s", t->value->cstring);
   if ((t = dict_find(iter, KEY_STATE_DISTANCE_M))) s_state.distance_m = t->value->int32;
@@ -1162,6 +1200,8 @@ static void window_load(Window *window) {
   s_color_dark = GColorBlack;
   s_color_dim  = GColorLightGray;
   s_color_fg   = persist_read_bool(PERSIST_KEY_LIGHT_TEXT) ? GColorBlack : GColorWhite;
+  s_state.use_metric = persist_exists(PERSIST_KEY_USE_METRIC)
+    ? persist_read_bool(PERSIST_KEY_USE_METRIC) : true;
 #else
   s_color_bg   = GColorBlack;
   s_color_fg   = GColorWhite;
