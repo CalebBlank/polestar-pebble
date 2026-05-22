@@ -423,14 +423,22 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
                           const char *number, const char *label, bool large) {
   int y = CONTENT_Y;
   int w = bounds.size.w - INSET_X * 2;
-  (void)large;  // font size now uniform across all pages
-
+#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
+  GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_60_NUMBERS_AM_PM : FONT_KEY_LECO_42_NUMBERS);
+  int num_h  = large ? 68 : 52;
+  int lbl_y  = y + (large ? 60 : 44);
+#else
+  (void)large;
+  GFont num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+  int num_h  = 52;
+  int lbl_y  = y + 44;
+#endif
   graphics_context_set_text_color(ctx, COLOR_FG);
-  draw_text(ctx, number, fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS),
-            GRect(INSET_X, y, w, 52),
+  draw_text(ctx, number, num_font,
+            GRect(INSET_X, y, w, num_h),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
   draw_text(ctx, label, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 44, w, 70),
+            GRect(INSET_X, lbl_y, w, 70),
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 0);
 }
 
@@ -572,11 +580,18 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   char num[8];
   snprintf(num, sizeof(num), "%d", s_state.charge_pct);
   draw_big_stat(ctx, bounds, num, "charged", true);
-  // ROBOTO_BOLD_SUBSET_49 digits are ~30px wide; % glyph bottom aligned with number bottom
-  int digits   = s_state.charge_pct >= 100 ? 3 : (s_state.charge_pct >= 10 ? 2 : 1);
+  int digits = s_state.charge_pct >= 100 ? 3 : (s_state.charge_pct >= 10 ? 2 : 1);
+#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
+  int digit_w  = 40;
+  int glyph_sz = 24;
+  int glyph_y  = CONTENT_Y + 20;
+#else
+  int digit_w  = 30;
   int glyph_sz = 18;
+  int glyph_y  = CONTENT_Y + 16;
+#endif
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * 30 + 4, CONTENT_Y + 16),
+    GPoint(INSET_X + digits * digit_w + 4, glyph_y),
     glyph_sz);
   draw_car_bottom(ctx, bounds);
 }
