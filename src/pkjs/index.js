@@ -396,7 +396,8 @@ function buildClayConfig() {
       { 'type': 'heading', 'defaultValue': 'Display' },
       { 'type': 'toggle', 'messageKey': 'SETTING_LIGHT_TEXT',
         'label': 'Black text (light mode)', 'defaultValue': light }
-    ]}
+    ]},
+    { 'type': 'submit', 'defaultValue': 'Save & Refresh' }
   ];
 }
 
@@ -433,6 +434,9 @@ Pebble.addEventListener('webviewclosed', function(e) {
     msg[KEY_SETTING_UNITS]     = metric ? 1 : 0;
     msg[KEY_SETTING_LIGHT_TEXT] = light  ? 1 : 0;
     Pebble.sendAppMessage(msg, function() {}, function() {});
+
+    // Immediately fetch fresh car data with the updated settings/credentials
+    handleCmd(CMD_REFRESH);
   } catch(e4) {
     console.log('webviewclosed error: ' + e4);
   }

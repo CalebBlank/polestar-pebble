@@ -359,8 +359,8 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     int px = w*29/100, py = h-mh1;
     int ldx = px+5, rdx = w*33/100;
     int amp = mh1/10;
-    int dx_rise = amp * ldx / mh1;
-    int dx_fall = amp * rdx / mh1;
+    int dx_rise = 2 * amp * ldx / mh1;
+    int dx_fall = 2 * amp * rdx / mh1;
     int n = 5;
     int xl = px - n * (dx_rise + dx_fall) / 2;
     int zy = py + mh1*40/100;
@@ -378,8 +378,8 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     int px = w*70/100, py = h-mh2;
     int ldx = w*37/100, rdx = w*30/100+5;
     int amp = mh2/10;
-    int dx_rise = amp * ldx / mh2;
-    int dx_fall = amp * rdx / mh2;
+    int dx_rise = 2 * amp * ldx / mh2;
+    int dx_fall = 2 * amp * rdx / mh2;
     int n = 5;
     int xl = px - n * (dx_rise + dx_fall) / 2;
     int zy = py + mh2*40/100;
@@ -480,9 +480,9 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int num_h  = large ? 68 : 52;
   int lbl_y  = y + (large ? 60 : 44);
 #else
-  GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_LECO_28_LIGHT_NUMBERS);
+  GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
   int num_h  = large ? 52 : 36;
-  int lbl_y  = y + (large ? 44 : 30);
+  int lbl_y  = y + (large ? 44 : 28);
 #endif
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, number, num_font,
@@ -549,7 +549,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
 #elif defined(PBL_PLATFORM_CHALK)
       int cw = w * 26 / 100;
 #else
-      int cw = w * 27 / 100;
+      int cw = w * 36 / 100;
 #endif
       int ch  = cw * 72 / 161;
       int gr  = w * 52 / 100;
@@ -597,8 +597,15 @@ static void car_anim_update(Animation *anim, const AnimationProgress progress) {
 static const AnimationImplementation s_car_anim_impl = { .update = car_anim_update };
 
 static void car_layer_update_proc(Layer *layer, GContext *ctx) {
-  if (s_car_cur.w <= 0) return;
   GRect bounds = layer_get_bounds(layer);
+
+  // On non-sliding layer so the hint doesn't sweep across screen during transitions
+  if (s_page == PAGE_CLIMATE || s_page == PAGE_LOCK || s_page == PAGE_LOCATION) {
+    graphics_context_set_fill_color(ctx, COLOR_DARK);
+    graphics_fill_circle(ctx, GPoint(bounds.size.w + 6, bounds.size.h / 2), 16);
+  }
+
+  if (s_car_cur.w <= 0) return;
   if ((int)s_car_cur.y >= bounds.size.h) return;  // parked off-screen below
   int cw = (int)s_car_cur.w;
   int ch = cw * 72 / 161;
@@ -787,7 +794,10 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
     s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 2, 4);
 #endif
 
-  draw_globe(ctx, bounds);
+  // During the ground morph the car layer owns the globe visual; skip duplicate draw
+  if (!s_ground_morph) {
+    draw_globe(ctx, bounds);
+  }
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
@@ -873,11 +883,6 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
     case PAGE_LOCATION:    draw_page_location(ctx, bounds);    break;
   }
 
-  // Semi-circle on right edge indicating an action menu is available on select
-  if (page == PAGE_CLIMATE || page == PAGE_LOCK || page == PAGE_LOCATION) {
-    graphics_context_set_fill_color(ctx, COLOR_DARK);
-    graphics_fill_circle(ctx, GPoint(bounds.size.w + 6, bounds.size.h / 2), 16);
-  }
 }
 
 // ── AppMessage ────────────────────────────────────────────────────────────────
