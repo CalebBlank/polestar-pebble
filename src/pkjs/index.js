@@ -13,6 +13,7 @@ var KEY_SETTING_UNITS    = 10;
 var KEY_SETTING_API_KEY  = 11;
 var KEY_ERROR            = 12;
 var KEY_STATE_DISTANCE_M = 13;
+var KEY_SETTING_LIGHT_TEXT = 14;
 
 var CMD_REFRESH          = 1;
 var CMD_TOGGLE_LOCK      = 2;
@@ -340,8 +341,12 @@ function deleteChargePin() {
 // ── Pebble events ─────────────────────────────────────────────────────────────
 Pebble.addEventListener('ready', function() {
   getStoredCreds();
-  // Short delay lets the AppMessage channel fully open on both sides
   setTimeout(function() {
+    // Send persisted settings before data
+    var light_text = localStorage.getItem('light_text') === 'true' ? 1 : 0;
+    var settingsMsg = {};
+    settingsMsg[KEY_SETTING_LIGHT_TEXT] = light_text;
+    Pebble.sendAppMessage(settingsMsg, function() {}, function() {});
     if (!s_username || !s_password) {
       sendMockData();
       return;
@@ -391,21 +396,27 @@ var CONFIG_HTML = [
   '<div class="section"><h2>Units</h2>',
   '<div class="row"><span>Use metric (km, °C)</span>',
   '<input type="checkbox" id="m" checked/></div></div>',
+  '<div class="section"><h2>Display</h2>',
+  '<div class="row"><span>Black text (light mode)</span>',
+  '<input type="checkbox" id="lt"/></div></div>',
   '<button onclick="save()">Save to Watch</button>',
   '<script>',
   'try{var s=JSON.parse(localStorage.getItem("polestar_creds")||"{}");',
   'if(s.username)document.getElementById("e").value=s.username;}catch(ex){}',
   'if(localStorage.getItem("use_metric")==="false")document.getElementById("m").checked=false;',
+  'if(localStorage.getItem("light_text")==="true")document.getElementById("lt").checked=true;',
   'function save(){',
   'var e=document.getElementById("e").value.trim(),',
   'p=document.getElementById("p").value,',
   'm=document.getElementById("m").checked,',
+  'lt=document.getElementById("lt").checked,',
   'err=document.getElementById("err");',
   'if(!e||!p){err.style.display="block";return;}',
   'err.style.display="none";',
   'localStorage.setItem("polestar_creds",JSON.stringify({username:e,password:p}));',
   'localStorage.setItem("use_metric",m?"true":"false");',
-  'location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({metric:m}));}',
+  'localStorage.setItem("light_text",lt?"true":"false");',
+  'location.href="pebblejs://close#"+encodeURIComponent(JSON.stringify({metric:m,lightText:lt}));}',
   '<\/script></body></html>'
 ].join('');
 
@@ -418,9 +429,12 @@ Pebble.addEventListener('webviewclosed', function(e) {
     try {
       var data = JSON.parse(decodeURIComponent(e.response));
       var use_metric = data.metric !== false ? 1 : 0;
+      var light_text = data.lightText ? 1 : 0;
       localStorage.setItem('use_metric', use_metric ? 'true' : 'false');
+      localStorage.setItem('light_text', light_text ? 'true' : 'false');
       var msg = {};
       msg[KEY_SETTING_UNITS] = use_metric;
+      msg[KEY_SETTING_LIGHT_TEXT] = light_text;
       Pebble.sendAppMessage(msg, function() {}, function() {});
     } catch (err) {}
   }

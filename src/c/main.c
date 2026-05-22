@@ -22,6 +22,9 @@
 #define KEY_SETTING_API_KEY    11
 #define KEY_ERROR              12
 #define KEY_STATE_DISTANCE_M   13
+#define KEY_SETTING_LIGHT_TEXT 14
+
+#define PERSIST_KEY_LIGHT_TEXT 1
 
 #define CMD_REFRESH        1
 #define CMD_TOGGLE_LOCK    2
@@ -40,17 +43,14 @@
 #define PAGE_COUNT       7
 
 // ── Colors ────────────────────────────────────────────────────────────────────
-#ifdef PBL_COLOR
-  #define COLOR_BG    GColorChromeYellow
-  #define COLOR_FG    GColorWhite
-  #define COLOR_DARK  GColorBlack
-  #define COLOR_DIM   GColorLightGray
-#else
-  #define COLOR_BG    GColorBlack
-  #define COLOR_FG    GColorWhite
-  #define COLOR_DARK  GColorBlack
-  #define COLOR_DIM   GColorWhite
-#endif
+static GColor s_color_fg;
+static GColor s_color_bg;
+static GColor s_color_dark;
+static GColor s_color_dim;
+#define COLOR_FG   s_color_fg
+#define COLOR_BG   s_color_bg
+#define COLOR_DARK s_color_dark
+#define COLOR_DIM  s_color_dim
 
 // ── Layout ────────────────────────────────────────────────────────────────────
 // Gabbro has rx=18 rounded corners — need wider inset to stay inside the mask
@@ -112,23 +112,82 @@ static Layer            *s_anim_layer      = NULL;
 static int               s_anim_from_page  = 0;
 typedef struct { int32_t x, y, w, rot; } CarState;
 static CarState          s_car_cur;          // current (animated) state
-static CarState          s_car_phase[4];     // [0]=exit_from [1]=exit_to [2]=enter_from [3]=enter_to
-static bool              s_car_drive_mode;   // true=drive off/on, false=simple lerp
+static CarState          s_car_phase[2];     // [0]=start [1]=target
 static Layer            *s_car_layer        = NULL;
 static bool              s_ground_morph     = false;
 static int32_t           s_ground_morph_p   = 0;
-static Layer            *s_affordance_layer = NULL;
+static bool              s_globe_spinning   = false;
+static int32_t           s_globe_rot        = 0;
+static ActionBarLayer   *s_action_bar  = NULL;
+static GBitmap          *s_icon_up     = NULL;
+static GBitmap          *s_icon_select = NULL;
+static GBitmap          *s_icon_down   = NULL;
 
-// ── Affordance layer ──────────────────────────────────────────────────────────
+// ── Action bar ────────────────────────────────────────────────────────────────
 
 static bool page_has_affordance(int page) {
   return page == PAGE_CLIMATE || page == PAGE_LOCK || page == PAGE_LOCATION;
 }
 
-static void affordance_layer_update_proc(Layer *layer, GContext *ctx) {
-  GRect bounds = layer_get_bounds(layer);
-  graphics_context_set_fill_color(ctx, COLOR_DARK);
-  graphics_fill_circle(ctx, GPoint(bounds.size.w, bounds.size.h / 2), 7);
+// On color platforms use 8-bit format (GColor8: AARRGGBB packed, 0xFF=white opaque,
+// 0x00=transparent). On B&W platforms fall back to 1-bit.
+#ifdef PBL_COLOR
+  #define ICON_FORMAT GBitmapFormat8Bit
+  static void set_icon_pixel(uint8_t *data, int stride, int x, int y, uint8_t color) {
+    data[y * stride + x] = color;
+  }
+  // white opaque
+  #define ICON_FG 0xFF
+#else
+  #define ICON_FORMAT GBitmapFormat1Bit
+  static void set_icon_pixel(uint8_t *data, int stride, int x, int y, uint8_t color) {
+    (void)color;
+    data[y * stride + x / 8] |= (uint8_t)(1 << (x % 8));
+  }
+  #define ICON_FG 1
+#endif
+
+static GBitmap *icon_blank(void) {
+  GBitmap *bmp = gbitmap_create_blank(GSize(18, 18), ICON_FORMAT);
+  if (!bmp) return NULL;
+  memset(gbitmap_get_data(bmp), 0, (size_t)(18 * gbitmap_get_bytes_per_row(bmp)));
+  return bmp;
+}
+
+static GBitmap *create_icon_up(void) {
+  GBitmap *bmp = icon_blank();
+  if (!bmp) return NULL;
+  uint8_t *data = gbitmap_get_data(bmp);
+  int stride = gbitmap_get_bytes_per_row(bmp);
+  for (int r = 6; r <= 11; r++) {
+    for (int c = 15 - r; c <= r + 3; c++) set_icon_pixel(data, stride, c, r, ICON_FG);
+  }
+  return bmp;
+}
+
+static GBitmap *create_icon_down(void) {
+  GBitmap *bmp = icon_blank();
+  if (!bmp) return NULL;
+  uint8_t *data = gbitmap_get_data(bmp);
+  int stride = gbitmap_get_bytes_per_row(bmp);
+  for (int r = 6; r <= 11; r++) {
+    for (int c = r - 2; c <= 20 - r; c++) set_icon_pixel(data, stride, c, r, ICON_FG);
+  }
+  return bmp;
+}
+
+static GBitmap *create_icon_select(void) {
+  GBitmap *bmp = icon_blank();
+  if (!bmp) return NULL;
+  uint8_t *data = gbitmap_get_data(bmp);
+  int stride = gbitmap_get_bytes_per_row(bmp);
+  int dot_xs[] = {2, 8, 14};
+  for (int i = 0; i < 3; i++) {
+    for (int dy = 0; dy < 2; dy++) {
+      for (int dx = 0; dx < 2; dx++) set_icon_pixel(data, stride, dot_xs[i] + dx, 8 + dy, ICON_FG);
+    }
+  }
+  return bmp;
 }
 
 // ── Icon drawing ──────────────────────────────────────────────────────────────
@@ -318,14 +377,19 @@ static void draw_polyline(GContext *ctx, GPoint *pts, int n) {
   for (int i = 0; i < n - 1; i++) graphics_draw_line(ctx, pts[i], pts[i+1]);
 }
 
-// Draw two mountain peaks with chamfered tips (5-point polygon per peak).
+// Draw two mountain peaks with chamfered tips and white snow caps.
 static void draw_mountains(GContext *ctx, GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
-  // Peak heights scale with screen height; ratios from emery (228px) reference
-  int mh1 = h * 32 / 100;  // ~73px at h=228
-  int mh2 = h * 40 / 100;  // ~91px at h=228
+  int mh1 = h * 32 / 100;
+  int mh2 = h * 40 / 100;
+
+  // Mountain body: bg-color fill (orange) with black outline — shows silhouette
+#ifdef PBL_COLOR
+  graphics_context_set_fill_color(ctx, COLOR_BG);
+#else
   graphics_context_set_fill_color(ctx, COLOR_FG);
+#endif
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
 
@@ -361,6 +425,48 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     gpath_draw_outline(ctx, path);
     gpath_destroy(path);
   }
+
+  // Snow caps: white triangles at each peak
+  graphics_context_set_fill_color(ctx, COLOR_FG);
+  {
+    int cap_h = mh1 / 4;
+    int cap_w = cap_h * 5 / 3;
+    int px = w * 29 / 100, py = h - mh1;
+    GPoint pts[] = {
+      {px - cap_w / 2, py + cap_h},
+      {px,             py},
+      {px + cap_w / 2, py + cap_h},
+    };
+    GPathInfo info = { .num_points = 3, .points = pts };
+    GPath *path = gpath_create(&info);
+    gpath_draw_filled(ctx, path);
+    gpath_destroy(path);
+  }
+  {
+    int cap_h = mh2 / 4;
+    int cap_w = cap_h * 5 / 3;
+    int px = w * 70 / 100, py = h - mh2;
+    GPoint pts[] = {
+      {px - cap_w / 2, py + cap_h},
+      {px,             py},
+      {px + cap_w / 2, py + cap_h},
+    };
+    GPathInfo info = { .num_points = 3, .points = pts };
+    GPath *path = gpath_create(&info);
+    gpath_draw_filled(ctx, path);
+    gpath_destroy(path);
+  }
+}
+
+static GPoint globe_pt(int gx, int gy, int gr, int sx, int sy) {
+  int rx = (sx - 152) * gr / 149;
+  int ry = (sy - 152) * gr / 149;
+  if (s_globe_rot == 0) return GPoint(gx + rx, gy + ry);
+  int32_t ca = cos_lookup(s_globe_rot);
+  int32_t sa = sin_lookup(s_globe_rot);
+  int rotx = (int)((int64_t)rx * ca / TRIG_MAX_RATIO - (int64_t)ry * sa / TRIG_MAX_RATIO);
+  int roty = (int)((int64_t)rx * sa / TRIG_MAX_RATIO + (int64_t)ry * ca / TRIG_MAX_RATIO);
+  return GPoint(gx + rotx, gy + roty);
 }
 
 // Globe with lines from Globe.svg. Center shifted right.
@@ -382,7 +488,7 @@ static void draw_globe(GContext *ctx, GRect bounds) {
 
   // Globe lines from Globe.svg (303×303, center 152,152, radius 149)
   // Screen point: gx + (sx-152)*gr/149, gy + (sy-152)*gr/149
-  #define GP(sx,sy) GPoint((int16_t)(gx+((sx)-152)*gr/149), (int16_t)(gy+((sy)-152)*gr/149))
+  #define GP(sx,sy) globe_pt(gx, gy, gr, sx, sy)
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
   { GPoint p[] = { GP(28,68), GP(62,97), GP(65,126), GP(90,150), GP(93,182), GP(27,228) };
@@ -540,28 +646,10 @@ static CarState car_target_for_page(int page, GRect bounds) {
 #define LERP_P(a, b, p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
 
 static void car_anim_update(Animation *anim, const AnimationProgress progress) {
-  if (s_car_drive_mode) {
-    const int32_t EXIT_FRAC = ANIMATION_NORMALIZED_MAX * 35 / 100;
-    if (progress <= EXIT_FRAC) {
-      int32_t p = (int64_t)progress * ANIMATION_NORMALIZED_MAX / EXIT_FRAC;
-      s_car_cur.x   = LERP_P(s_car_phase[0].x, s_car_phase[1].x, p);
-      s_car_cur.y   = s_car_phase[0].y;
-      s_car_cur.w   = s_car_phase[0].w;
-      s_car_cur.rot = s_car_phase[0].rot;
-    } else {
-      int32_t q = ANIMATION_NORMALIZED_MAX - EXIT_FRAC;
-      int32_t p = (int64_t)(progress - EXIT_FRAC) * ANIMATION_NORMALIZED_MAX / q;
-      s_car_cur.x   = LERP_P(s_car_phase[2].x, s_car_phase[3].x, p);
-      s_car_cur.y   = LERP_P(s_car_phase[2].y, s_car_phase[3].y, p);
-      s_car_cur.w   = LERP_P(s_car_phase[2].w, s_car_phase[3].w, p);
-      s_car_cur.rot = LERP_P(s_car_phase[2].rot, s_car_phase[3].rot, p);
-    }
-  } else {
-    s_car_cur.x   = LERP_P(s_car_phase[0].x, s_car_phase[3].x, progress);
-    s_car_cur.y   = LERP_P(s_car_phase[0].y, s_car_phase[3].y, progress);
-    s_car_cur.w   = LERP_P(s_car_phase[0].w, s_car_phase[3].w, progress);
-    s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[3].rot, progress);
-  }
+  s_car_cur.x   = LERP_P(s_car_phase[0].x, s_car_phase[1].x, progress);
+  s_car_cur.y   = LERP_P(s_car_phase[0].y, s_car_phase[1].y, progress);
+  s_car_cur.w   = LERP_P(s_car_phase[0].w, s_car_phase[1].w, progress);
+  s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[1].rot, progress);
   if (s_ground_morph) {
     s_ground_morph_p = progress;
     if (progress >= ANIMATION_NORMALIZED_MAX) s_ground_morph = false;
@@ -877,6 +965,15 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
   if ((t = dict_find(iter, KEY_STATE_LOCATION)))
     snprintf(s_state.location, sizeof(s_state.location), "%s", t->value->cstring);
   if ((t = dict_find(iter, KEY_STATE_DISTANCE_M))) s_state.distance_m = t->value->int32;
+  if ((t = dict_find(iter, KEY_SETTING_LIGHT_TEXT))) {
+#ifdef PBL_COLOR
+    bool lt = (bool)t->value->int32;
+    persist_write_bool(PERSIST_KEY_LIGHT_TEXT, lt);
+    s_color_fg = lt ? GColorBlack : GColorWhite;
+    if (s_status_bar) status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_FG);
+    if (s_page_label) text_layer_set_text_color(s_page_label, COLOR_FG);
+#endif
+  }
 
   layer_mark_dirty(s_canvas);
 }
@@ -973,7 +1070,51 @@ static void open_action_menu(void) {
   window_stack_push(s_action_window, true);
 }
 
+// ── Globe spin ────────────────────────────────────────────────────────────────
+
+static void globe_spin_update(Animation *anim, const AnimationProgress progress) {
+  s_globe_rot = (int32_t)((int64_t)TRIG_MAX_ANGLE * progress / ANIMATION_NORMALIZED_MAX);
+  layer_mark_dirty(s_canvas);
+}
+static void globe_spin_stopped(Animation *anim, bool finished, void *context) {
+  s_globe_spinning = false;
+  s_globe_rot = 0;
+  layer_mark_dirty(s_canvas);
+}
+static const AnimationImplementation s_globe_spin_impl = { .update = globe_spin_update };
+
+static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
+  if (s_page != PAGE_ODO || s_globe_spinning || s_animating) return;
+  s_globe_spinning = true;
+  Animation *anim = animation_create();
+  animation_set_implementation(anim, &s_globe_spin_impl);
+  animation_set_duration(anim, 800);
+  animation_set_curve(anim, AnimationCurveEaseInOut);
+  animation_set_handlers(anim, (AnimationHandlers){ .stopped = globe_spin_stopped }, NULL);
+  animation_schedule(anim);
+}
+
 // ── Page transition animation ─────────────────────────────────────────────────
+
+static AnimationProgress spring_curve(AnimationProgress d) {
+  int32_t N = ANIMATION_NORMALIZED_MAX;
+  if (d <= 0) return 0;
+  if (d >= N) return N;
+  int32_t T1   = N * 3 / 4;
+  int32_t PEAK = N + N / 20;
+  if (d <= T1) {
+    int64_t u  = (int64_t)d * N / T1;
+    int64_t u2 = u * u / N;
+    int64_t u3 = u2 * u / N;
+    return (AnimationProgress)((3 * u2 - 2 * u3) * PEAK / N);
+  } else {
+    int64_t dt  = d - T1;
+    int64_t rem = N - T1;
+    int64_t v   = dt * N / rem;
+    int64_t q   = v * v / N;
+    return (AnimationProgress)(PEAK - (int64_t)(PEAK - N) * q / N);
+  }
+}
 
 static void update_page_indicator(void) {
   snprintf(s_page_buf, sizeof(s_page_buf), "%d/%d", s_page + 1, PAGE_COUNT);
@@ -990,16 +1131,8 @@ static void transition_stopped(Animation *anim, bool finished, void *context) {
   GRect r = layer_get_bounds(window_get_root_layer(s_window));
   layer_set_frame(s_canvas, r);
 
-  // Slide affordance back in from the right if new page has one
   if (page_has_affordance(s_page)) {
-    GRect aff_start = GRect(r.size.w, 0, r.size.w, r.size.h);
-    GRect aff_end   = GRect(0, 0, r.size.w, r.size.h);
-    layer_set_frame(s_affordance_layer, aff_start);
-    PropertyAnimation *pa_in = property_animation_create_layer_frame(
-      s_affordance_layer, NULL, &aff_end);
-    animation_set_duration((Animation*)pa_in, 180);
-    animation_set_curve((Animation*)pa_in, AnimationCurveEaseOut);
-    animation_schedule((Animation*)pa_in);
+    action_bar_layer_add_to_window(s_action_bar, s_window);
   }
 }
 
@@ -1029,50 +1162,40 @@ static void navigate(int dir) {
 
   PropertyAnimation *pa_in  = property_animation_create_layer_frame(s_canvas, &canvas_start, &canvas_end);
   PropertyAnimation *pa_out = property_animation_create_layer_frame(s_anim_layer, &anim_start, &anim_end);
-  animation_set_duration((Animation*)pa_in,  280);
-  animation_set_curve((Animation*)pa_in,  AnimationCurveEaseInOut);
-  animation_set_duration((Animation*)pa_out, 280);
-  animation_set_curve((Animation*)pa_out, AnimationCurveEaseInOut);
+  animation_set_duration((Animation*)pa_in,  320);
+  animation_set_curve((Animation*)pa_in,  AnimationCurveCustomFunction);
+  animation_set_custom_curve((Animation*)pa_in,  spring_curve);
+  animation_set_duration((Animation*)pa_out, 260);
+  animation_set_curve((Animation*)pa_out, AnimationCurveEaseIn);
 
-  // Car animation: drive off one edge and onto the next page from the other side
   bool from_car = is_car_page(s_anim_from_page);
   bool to_car   = is_car_page(s_page);
   CarState target = car_target_for_page(s_page, bounds);
-  s_car_drive_mode = (from_car && to_car);
-  s_ground_morph   = (s_car_drive_mode && s_anim_from_page == PAGE_RANGE && s_page == PAGE_ODO);
+  s_ground_morph   = (from_car && to_car && s_anim_from_page == PAGE_RANGE && s_page == PAGE_ODO);
   s_ground_morph_p = 0;
-  if (s_car_drive_mode) {
-    int32_t exit_x  = dir > 0 ? (int32_t)(w + s_car_cur.w + 4) : -(int32_t)(s_car_cur.w + 4);
-    int32_t enter_x = dir > 0 ? -(int32_t)(target.w + 4)       : (int32_t)(w + target.w + 4);
-    s_car_phase[0] = s_car_cur;
-    s_car_phase[1] = (CarState){ exit_x,  s_car_cur.y, s_car_cur.w, s_car_cur.rot };
-    s_car_phase[2] = (CarState){ enter_x, s_car_cur.y, s_car_cur.w, s_car_cur.rot };
-    s_car_phase[3] = target;
+  if (!from_car && to_car) {
+    // Car drives in from the navigation edge (e.g. lock → charge_time)
+    int32_t enter_x = dir > 0
+      ? -(int32_t)(target.w + 4)
+      : (int32_t)(w + target.w + 4);
+    s_car_phase[0] = (CarState){ enter_x, target.y, target.w, target.rot };
   } else {
-    if (!from_car && to_car) {
-      // Car drives in from the navigation edge (e.g. lock → charge_time)
-      int32_t enter_x = dir > 0
-        ? -(int32_t)(target.w + 4)
-        : (int32_t)(w + target.w + 4);
-      s_car_phase[0] = (CarState){ enter_x, target.y, target.w, target.rot };
-      s_car_phase[3] = target;
-    } else {
-      s_car_phase[0] = s_car_cur;
-      s_car_phase[3] = target;
-    }
+    s_car_phase[0] = s_car_cur;
   }
+  s_car_phase[1] = target;
+
   Animation *car_anim = animation_create();
   animation_set_implementation(car_anim, &s_car_anim_impl);
-  animation_set_duration(car_anim, 280);
-  animation_set_curve(car_anim, AnimationCurveEaseInOut);
+  animation_set_duration(car_anim, 340);
+  animation_set_curve(car_anim, AnimationCurveCustomFunction);
+  animation_set_custom_curve(car_anim, spring_curve);
 
-  // Affordance slides right during every transition; slides back in transition_stopped
-  GRect aff_off = GRect(w, 0, w, h);
-  PropertyAnimation *pa_aff = property_animation_create_layer_frame(s_affordance_layer, NULL, &aff_off);
-  animation_set_duration((Animation*)pa_aff, 160);
-  animation_set_curve((Animation*)pa_aff, AnimationCurveEaseIn);
+  // Hide action bar during transition; re-added in transition_stopped if new page needs it
+  if (page_has_affordance(s_anim_from_page)) {
+    action_bar_layer_remove_from_window(s_action_bar);
+  }
 
-  Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, (Animation*)pa_aff, NULL);
+  Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, NULL);
   animation_set_handlers(spawn, (AnimationHandlers){ .stopped = transition_stopped }, NULL);
   animation_schedule(spawn);
 }
@@ -1112,6 +1235,19 @@ static void window_load(Window *window) {
   Layer *root   = window_get_root_layer(window);
   GRect  bounds = layer_get_bounds(root);
 
+  // Runtime color initialization
+#ifdef PBL_COLOR
+  s_color_bg   = GColorChromeYellow;
+  s_color_dark = GColorBlack;
+  s_color_dim  = GColorLightGray;
+  s_color_fg   = persist_read_bool(PERSIST_KEY_LIGHT_TEXT) ? GColorBlack : GColorWhite;
+#else
+  s_color_bg   = GColorBlack;
+  s_color_fg   = GColorWhite;
+  s_color_dark = GColorBlack;
+  s_color_dim  = GColorWhite;
+#endif
+
   // Full-screen canvas (drawn behind the status bar layer)
   s_canvas = layer_create(bounds);
   layer_set_update_proc(s_canvas, canvas_update_proc);
@@ -1123,12 +1259,18 @@ static void window_load(Window *window) {
   layer_set_update_proc(s_car_layer, car_layer_update_proc);
   layer_add_child(root, s_car_layer);
 
-  // Affordance layer: persistent semicircle on right edge, slides right during transitions
-  GRect aff_frame = page_has_affordance(s_page)
-    ? bounds : GRect(bounds.size.w, 0, bounds.size.w, bounds.size.h);
-  s_affordance_layer = layer_create(aff_frame);
-  layer_set_update_proc(s_affordance_layer, affordance_layer_update_proc);
-  layer_add_child(root, s_affordance_layer);
+  // Action bar for action pages (climate, lock, location)
+  s_icon_up     = create_icon_up();
+  s_icon_select = create_icon_select();
+  s_icon_down   = create_icon_down();
+  s_action_bar  = action_bar_layer_create();
+  action_bar_layer_set_click_config_provider(s_action_bar, click_config_provider);
+  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_UP,     s_icon_up);
+  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_SELECT, s_icon_select);
+  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_DOWN,   s_icon_down);
+  if (page_has_affordance(s_page)) {
+    action_bar_layer_add_to_window(s_action_bar, s_window);
+  }
 
   // Native status bar — auto-updates time, orange bg, white fg, no separator
   s_status_bar = status_bar_layer_create();
@@ -1148,12 +1290,18 @@ static void window_load(Window *window) {
 
   update_page_indicator();
   window_set_click_config_provider(window, click_config_provider);
+  accel_tap_service_subscribe(accel_tap_handler);
 }
 
 static void window_unload(Window *window) {
+  accel_tap_service_unsubscribe();
   layer_destroy(s_canvas);
   layer_destroy(s_car_layer);
-  layer_destroy(s_affordance_layer);
+  action_bar_layer_remove_from_window(s_action_bar);
+  action_bar_layer_destroy(s_action_bar);
+  gbitmap_destroy(s_icon_up);
+  gbitmap_destroy(s_icon_select);
+  gbitmap_destroy(s_icon_down);
   status_bar_layer_destroy(s_status_bar);
   text_layer_destroy(s_page_label);
 }
