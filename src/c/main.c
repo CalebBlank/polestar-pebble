@@ -375,7 +375,9 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
 
   // Car at 25° LEFT from top of globe, tilted -25° CCW (front/right tilts up)
 #if defined(PBL_PLATFORM_EMERY)
-  int car_w = w * 36 / 100;
+  int car_w = w * 40 / 100;
+#elif defined(PBL_PLATFORM_CHALK)
+  int car_w = w * 35 / 100;
 #else
   int car_w = w * 42 / 100;
 #endif
@@ -472,7 +474,7 @@ static void draw_action_affordance(GContext *ctx, GRect bounds) {
 // ── Page renderers ────────────────────────────────────────────────────────────
 
 static void draw_page_climate(GContext *ctx, GRect bounds) {
-  int y = CONTENT_Y;
+  int y = CONTENT_Y + 8;
   int w = bounds.size.w - INSET_X * 2;
 
   graphics_context_set_text_color(ctx, COLOR_FG);
@@ -648,7 +650,7 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
-  int y = CONTENT_Y;
+  int y = CONTENT_Y + 8;
   int w = bounds.size.w - INSET_X * 2;
   graphics_context_set_text_color(ctx, COLOR_FG);
   draw_text(ctx, s_state.location,
