@@ -196,6 +196,7 @@ static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle, int wheel_r
 static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
                                 int car_w, int car_h, int bounds_w, int bounds_h,
                                 int32_t morph_p) {
+  (void)bounds_w;
 #define CABLE_LERP(a,b,p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
@@ -209,15 +210,15 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   int ground_y = car_y + car_h;
 #endif
   // Quadratic bezier: port → hangs vertically down → runs off left edge.
-  // morph_p > 0: cable tightens upward and sweeps off-screen left.
-  // Sweep the entire cable off the left edge during the page transition
-  int32_t cable_sweep = CABLE_LERP(0, -(bounds_w + car_w + 20), morph_p);
-  int sx = port_x + (int)cable_sweep;
+  // morph_p > 0: cable tightens upward (lifts off ground) and sweeps off-screen left.
+  // Start stays attached to the car; midpoint and end rise to port level while
+  // end sweeps left — cable visibly retracts over the full transition duration.
+  int sx = port_x;
   int sy = port_y;
-  int mx = sx;
-  int my = ground_y;
-  int ex = (int)(-4 + cable_sweep);
-  int ey = ground_y;
+  int mx = port_x;
+  int my = (int)CABLE_LERP(ground_y, port_y, morph_p);
+  int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
+  int ey = (int)CABLE_LERP(ground_y, port_y, morph_p);
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
   for (int pass = 0; pass < 2; pass++) {
@@ -247,7 +248,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int max_bw = r.size.h * 5 / 7;
   int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw);
   int bh     = bw * 8 / 9;    // 72→64px (matches Figma body height exactly)
-  int arm_h  = bw * 20 / 100; // shorter shackle arms
+  int arm_h  = bw * 16 / 100; // shorter shackle arms
   int arc_r  = bw * 22 / 100; // 72→16px (center-of-stroke shackle radius)
   int arm_sw = bw * 19 / 100; // 72→14px (shackle stroke width, Figma outer-inner)
   arm_sw = MAX(arm_sw, 4);
@@ -264,7 +265,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
 
   // Left arm always inserts into body; right arm has a gap when unlocked
   int left_bot  = by + ol;
-  int right_bot = locked ? (by + ol) : (by - arm_h / 2);
+  int right_bot = locked ? (by + ol) : (by - arm_h);
   GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
 
   // Lock body drawn first; shackle is drawn on top so its white fill
@@ -318,11 +319,17 @@ static void draw_polyline(GContext *ctx, GPoint *pts, int n) {
 }
 
 // Draw two mountain peaks with chamfered tips and white fill.
+// Slope run is derived from peak height (not screen width) so the angle
+// is identical on every platform  (rise/run = 15/13 ≈ 49°).
 static void draw_mountains(GContext *ctx, GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
   int mh1 = h * 32 / 100;
   int mh2 = h * 40 / 100;
+  int px1 = w * 29 / 100;
+  int px2 = w * 70 / 100;
+  int run1 = mh1 * 13 / 15;
+  int run2 = mh2 * 13 / 15;
 
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
@@ -330,15 +337,14 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
 
   {
     GPoint pts[] = {
-      {-5,              h+4},
-      {w*27/100, h-mh1+3},
-      {w*28/100, h-mh1+1},
-      {w*29/100,   h-mh1},
-      {w*30/100, h-mh1+1},
-      {w*31/100, h-mh1+3},
-      {w*62/100,        h+4},
+      {(int16_t)(-5),           (int16_t)(h+4)},
+      {(int16_t)(px1 - run1),   (int16_t)(h+4)},
+      {(int16_t)(px1 - 4),      (int16_t)(h-mh1+3)},
+      {(int16_t)(px1),          (int16_t)(h-mh1)},
+      {(int16_t)(px1 + 4),      (int16_t)(h-mh1+3)},
+      {(int16_t)(px1 + run1),   (int16_t)(h+4)},
     };
-    GPathInfo info = { .num_points = 7, .points = pts };
+    GPathInfo info = { .num_points = 6, .points = pts };
     GPath *path = gpath_create(&info);
     gpath_draw_filled(ctx, path);
     gpath_draw_outline(ctx, path);
@@ -346,61 +352,53 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   }
   {
     GPoint pts[] = {
-      {w*33/100,        h+4},
-      {w*68/100, h-mh2+4},
-      {w*69/100, h-mh2+1},
-      {w*70/100,   h-mh2},
-      {w*71/100, h-mh2+1},
-      {w*72/100, h-mh2+4},
-      {w+5,             h+4},
+      {(int16_t)(px2 - run2),   (int16_t)(h+4)},
+      {(int16_t)(px2 - 4),      (int16_t)(h-mh2+3)},
+      {(int16_t)(px2),          (int16_t)(h-mh2)},
+      {(int16_t)(px2 + 4),      (int16_t)(h-mh2+3)},
+      {(int16_t)(px2 + run2),   (int16_t)(h+4)},
+      {(int16_t)(w+5),          (int16_t)(h+4)},
     };
-    GPathInfo info = { .num_points = 7, .points = pts };
+    GPathInfo info = { .num_points = 6, .points = pts };
     GPath *path = gpath_create(&info);
     gpath_draw_filled(ctx, path);
     gpath_draw_outline(ctx, path);
     gpath_destroy(path);
   }
 
-  // Zigzag with segments parallel to mountain slopes:
-  // rising half-teeth use the left-slope ratio, falling use the right-slope ratio.
+  // Zigzag: symmetric teeth, slope angle matches the mountain sides.
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
   {
-    int px = w*29/100, py = h-mh1;
-    int ldx = px+5, rdx = w*33/100;
-    int amp = mh1/12;
-    int dx_rise = 2 * amp * ldx / mh1;
-    int dx_fall = 2 * amp * rdx / mh1;
-    int n = 3;
-    int xl = px - n * (dx_rise + dx_fall) / 2;
-    int zy = py + mh1*45/100;
+    int amp = MAX(mh1 / 10, 6);
+    int dx  = 2 * amp * run1 / mh1;
+    int n   = 3;
+    int xl  = px1 - n * dx;
+    int zy  = (h - mh1) + mh1 * 45 / 100;
     GPoint prev = {0, 0};
     int x = xl, y = zy + amp;
     for (int i = 0; i <= 2 * n; i++) {
       GPoint pt = {(int16_t)x, (int16_t)y};
       if (i > 0) graphics_draw_line(ctx, prev, pt);
       prev = pt;
-      if (i % 2 == 0) { x += dx_rise; y = zy - amp; }
-      else             { x += dx_fall; y = zy + amp; }
+      x += dx;
+      y = (y == zy + amp) ? zy - amp : zy + amp;
     }
   }
   {
-    int px = w*70/100, py = h-mh2;
-    int ldx = w*37/100, rdx = w*30/100+5;
-    int amp = mh2/12;
-    int dx_rise = 2 * amp * ldx / mh2;
-    int dx_fall = 2 * amp * rdx / mh2;
-    int n = 3;
-    int xl = px - n * (dx_rise + dx_fall) / 2;
-    int zy = py + mh2*45/100;
+    int amp = MAX(mh2 / 10, 6);
+    int dx  = 2 * amp * run2 / mh2;
+    int n   = 3;
+    int xl  = px2 - n * dx;
+    int zy  = (h - mh2) + mh2 * 45 / 100;
     GPoint prev = {0, 0};
     int x = xl, y = zy + amp;
     for (int i = 0; i <= 2 * n; i++) {
       GPoint pt = {(int16_t)x, (int16_t)y};
       if (i > 0) graphics_draw_line(ctx, prev, pt);
       prev = pt;
-      if (i % 2 == 0) { x += dx_rise; y = zy - amp; }
-      else             { x += dx_fall; y = zy + amp; }
+      x += dx;
+      y = (y == zy + amp) ? zy - amp : zy + amp;
     }
   }
 }
@@ -486,18 +484,9 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int x = INSET_X + x_extra;
   int w = bounds.size.w - INSET_X * 2 - x_extra;
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
-  GFont num_font;
-  int num_h, lbl_y;
-  if (large) {
-    num_font = fonts_get_system_font(FONT_KEY_LECO_60_NUMBERS_AM_PM);
-    num_h = 68; lbl_y = y + 60;
-  } else if (strlen(number) > 5) {
-    num_font = fonts_get_system_font(FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
-    num_h = 36; lbl_y = y + 28;
-  } else {
-    num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
-    num_h = 52; lbl_y = y + 44;
-  }
+  GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_60_NUMBERS_AM_PM : FONT_KEY_LECO_42_NUMBERS);
+  int num_h  = large ? 68 : 52;
+  int lbl_y  = y + (large ? 60 : 44);
 #else
   GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
   int num_h  = large ? 52 : 36;
@@ -825,13 +814,17 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
   int val = s_state.use_metric
     ? s_state.odo_km
     : (int)(s_state.odo_km * 621 / 1000);
+#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
+  snprintf(num, sizeof(num), "%d", val);
+#else
   snprintf(num, sizeof(num), "%07d", val);
+#endif
 #ifdef PBL_ROUND
   draw_big_stat(ctx, bounds, num,
     s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 0, 4);
 #else
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 2, 4);
+    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 0, 4);
 #endif
 
   // During the ground morph the car layer owns the globe visual; skip duplicate draw

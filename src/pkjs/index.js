@@ -416,7 +416,9 @@ Pebble.addEventListener('showConfiguration', function() {
 Pebble.addEventListener('webviewclosed', function(e) {
   if (!e || !e.response) return;
   try {
-    var settings = clay.getSettings(e.response);
+    // Pass false to get the raw {key: {value: ...}} form; the default returns
+    // numeric-keyed message dicts where string keys like SETTING_UNITS are absent.
+    var settings = clay.getSettings(e.response, false);
 
     // Credentials: Clay fields with messageKey=null are keyed by id
     var email    = settings.email    ? String(settings.email.value    || '').trim() : '';
@@ -430,8 +432,6 @@ Pebble.addEventListener('webviewclosed', function(e) {
       getStoredCreds();
     }
 
-    // Settings: sent to watch automatically by Clay (via messageKey mapping),
-    // but also persist locally for re-injection at next showConfiguration.
     var metric = settings.SETTING_UNITS      ? !!settings.SETTING_UNITS.value      : true;
     var light  = settings.SETTING_LIGHT_TEXT ? !!settings.SETTING_LIGHT_TEXT.value : false;
     localStorage.setItem('use_metric', metric ? 'true' : 'false');
