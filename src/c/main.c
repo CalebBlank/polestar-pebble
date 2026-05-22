@@ -113,9 +113,9 @@ static void icon_stroke(GContext *ctx) {
 static void draw_icon_car(GContext *ctx, GRect r) {
   int x = r.origin.x, y = r.origin.y, w = r.size.w, h = r.size.h;
 
-  // Body polygon scaled from car_body.svg (161×54 viewBox).
-  // Wheel circles take the bottom ~20% of height; body fills the rest.
-  int wheel_r = MAX(h / 5, 8);
+  // Body polygon from car_body.svg (161×54 viewBox), roof corners chamfered.
+  // Wheels take bottom 25% of height; body fills the rest.
+  int wheel_r = MAX(h / 4, 10);
   int body_h  = h - wheel_r;
 
   GPoint pts[] = {
@@ -126,10 +126,12 @@ static void draw_icon_car(GContext *ctx, GRect r) {
     {(int16_t)(x + 158*w/161), (int16_t)(y + 48*body_h/54)},
     {(int16_t)(x + 156*w/161), (int16_t)(y + 27*body_h/54)},
     {(int16_t)(x + 119*w/161), (int16_t)(y + 19*body_h/54)},
-    {(int16_t)(x +  89*w/161), (int16_t)(y +  3*body_h/54)},
-    {(int16_t)(x +  44*w/161), (int16_t)(y +  3*body_h/54)},
+    {(int16_t)(x +  96*w/161), (int16_t)(y +  7*body_h/54)},  // chamfer rear roof corner
+    {(int16_t)(x +  81*w/161), (int16_t)(y +  3*body_h/54)},
+    {(int16_t)(x +  52*w/161), (int16_t)(y +  3*body_h/54)},  // chamfer front roof corner
+    {(int16_t)(x +  37*w/161), (int16_t)(y +  6*body_h/54)},
   };
-  GPathInfo info = { .num_points = 9, .points = pts };
+  GPathInfo info = { .num_points = 11, .points = pts };
   GPath *path = gpath_create(&info);
 
   icon_fill(ctx);
@@ -138,10 +140,10 @@ static void draw_icon_car(GContext *ctx, GRect r) {
   gpath_draw_outline(ctx, path);
   gpath_destroy(path);
 
-  // Wheels: front axle at ~35% from left, rear at ~68%, centred at body bottom
+  // Wheels: front axle at ~22% from left, rear at ~78%, matching Polestar proportions
   int wheel_y  = y + body_h;
-  int front_wx = x + 57  * w / 161;
-  int rear_wx  = x + 110 * w / 161;
+  int front_wx = x + 35  * w / 161;
+  int rear_wx  = x + 126 * w / 161;
 
   icon_fill(ctx);
   graphics_fill_circle(ctx, GPoint(front_wx, wheel_y), wheel_r);
@@ -155,31 +157,21 @@ static void draw_icon_car(GContext *ctx, GRect r) {
   graphics_fill_circle(ctx, GPoint(rear_wx,  wheel_y), 3);
 }
 
-static void draw_icon_charger(GContext *ctx, GRect r) {
-  int cx  = r.origin.x + r.size.w / 2;
-  int ty  = r.origin.y;
-  int by  = r.origin.y + r.size.h;
-  int hw  = r.size.w * 9 / 20;   // half-width of body
-  int hh  = r.size.h * 11 / 20;  // height of body
-  int prong_x = hw / 3;
-
-  icon_fill(ctx);
-  graphics_fill_rect(ctx, GRect(cx - hw, ty + 6, hw * 2, hh), 6, GCornersAll);
-  icon_stroke(ctx);
-  graphics_draw_round_rect(ctx, GRect(cx - hw, ty + 6, hw * 2, hh), 6);
-
+// Draw a charging cable plug: circle connector + horizontal cable stub to the right.
+static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
+                                int car_w, int car_h, int screen_w) {
+  int wheel_r = MAX(car_h / 4, 10);
+  int body_h  = car_h - wheel_r;
+  int port_x  = car_x + 143 * car_w / 161;  // rear upper area (charge port)
+  int port_y  = car_y + 28 * body_h / 54;
+  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_width(ctx, 5);
+  graphics_draw_line(ctx, GPoint(screen_w + 2, port_y), GPoint(port_x, port_y));
+  graphics_context_set_fill_color(ctx, COLOR_FG);
+  graphics_fill_circle(ctx, GPoint(port_x, port_y), 6);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 3);
-  graphics_draw_line(ctx, GPoint(cx - prong_x, ty), GPoint(cx - prong_x, ty + 8));
-  graphics_draw_line(ctx, GPoint(cx + prong_x, ty), GPoint(cx + prong_x, ty + 8));
-
-  int tip_r = MAX(r.size.w / 8, 5);
-  graphics_draw_line(ctx, GPoint(cx, ty + 6 + hh), GPoint(cx, by - tip_r));
-
-  icon_fill(ctx);
-  graphics_fill_circle(ctx, GPoint(cx, by - tip_r), tip_r);
-  icon_stroke(ctx);
-  graphics_draw_circle(ctx, GPoint(cx, by - tip_r), tip_r);
+  graphics_context_set_stroke_width(ctx, 2);
+  graphics_draw_circle(ctx, GPoint(port_x, port_y), 6);
 }
 
 static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
@@ -239,24 +231,42 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
 }
 
 
-// Draw two triangular mountain peaks behind the car.
-static void draw_triangle(GContext *ctx, GPoint a, GPoint b, GPoint c) {
-  GPoint pts[3] = {a, b, c};
-  GPathInfo info = { .num_points = 3, .points = pts };
-  GPath *path = gpath_create(&info);
-  gpath_draw_filled(ctx, path);
-  gpath_draw_outline(ctx, path);
-  gpath_destroy(path);
-}
-
+// Draw two mountain peaks with chamfered tips (5-point polygon per peak).
 static void draw_mountains(GContext *ctx, GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 2);
-  draw_triangle(ctx, GPoint(-5, h), GPoint(w * 29 / 100, h - 76), GPoint(w * 62 / 100, h));
-  draw_triangle(ctx, GPoint(w * 33 / 100, h), GPoint(w * 70 / 100, h - 94), GPoint(w + 5, h));
+
+  {
+    GPoint pts[] = {
+      {-5,             h},
+      {w*27/100,   h-70},  // chamfer left of peak
+      {w*29/100,   h-76},  // peak
+      {w*31/100,   h-70},  // chamfer right of peak
+      {w*62/100,       h},
+    };
+    GPathInfo info = { .num_points = 5, .points = pts };
+    GPath *path = gpath_create(&info);
+    gpath_draw_filled(ctx, path);
+    gpath_draw_outline(ctx, path);
+    gpath_destroy(path);
+  }
+  {
+    GPoint pts[] = {
+      {w*33/100,       h},
+      {w*68/100,   h-87},  // chamfer left of peak
+      {w*70/100,   h-94},  // peak
+      {w*72/100,   h-87},  // chamfer right of peak
+      {w+5,            h},
+    };
+    GPathInfo info = { .num_points = 5, .points = pts };
+    GPath *path = gpath_create(&info);
+    gpath_draw_filled(ctx, path);
+    gpath_draw_outline(ctx, path);
+    gpath_destroy(path);
+  }
 }
 
 // Draw a dome hill at the bottom with a car perched on top.
@@ -406,12 +416,25 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
     snprintf(num, sizeof(num), "%d", s_state.charge_min);
     draw_big_stat(ctx, bounds, num, "minutes\nuntil full");
   }
+
+  // Car at bottom with charging cable entering from the right
 #ifdef PBL_ROUND
-  draw_icon_charger(ctx,
-    GRect(bounds.size.w / 2 + 14, bounds.size.h - 116, 88, 108));
+  {
+    int car_w = 160, car_h = 64;
+    int car_x = bounds.size.w / 2 - car_w / 2;
+    int car_y = bounds.size.h - car_h - 14;
+    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h));
+    draw_road_strip(ctx, bounds);
+    draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w);
+  }
 #else
-  draw_icon_charger(ctx,
-    GRect(bounds.size.w - INSET_X - 78, bounds.size.h - 96, 74, 88));
+  {
+    int car_w = MIN(bounds.size.w - INSET_X * 2, 150), car_h = 62;
+    int car_x = bounds.size.w / 2 - car_w / 2;
+    int car_y = bounds.size.h - car_h - 6;
+    draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h));
+    draw_charging_cable(ctx, car_x, car_y, car_w, car_h, bounds.size.w);
+  }
 #endif
 }
 
