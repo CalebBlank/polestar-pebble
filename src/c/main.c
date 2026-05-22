@@ -113,6 +113,7 @@ static CarState          s_car_phase[2];     // [0]=start [1]=target
 static Layer            *s_car_layer        = NULL;
 static bool              s_ground_morph     = false;
 static int32_t           s_ground_morph_p   = 0;
+static int32_t           s_cable_anim_p     = 0;
 static bool              s_globe_spinning   = false;
 static int32_t           s_globe_rot        = 0;
 // ── Icon drawing ──────────────────────────────────────────────────────────────
@@ -192,7 +193,9 @@ static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle, int wheel_r
 // Cable hangs from the charge port (rear/left of car) down to ground,
 // then runs off the left edge toward the charger (off-screen).
 static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
-                                int car_w, int car_h, int bounds_w, int bounds_h) {
+                                int car_w, int car_h, int bounds_w, int bounds_h,
+                                int32_t morph_p) {
+#define CABLE_LERP(a,b,p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
   // Charge port: rear = left side of car
@@ -205,9 +208,11 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   int ground_y = car_y + car_h;
 #endif
   // Quadratic bezier: port → hangs vertically down → runs off left edge at ground
-  int sx = port_x, sy = port_y;    // start at port
-  int mx = port_x, my = ground_y; // control: directly below port at ground
-  int ex = -4,     ey = ground_y; // end: off left edge at ground
+  // morph_p > 0: flatten sy to ground and slide end off-screen left
+  int sx = port_x, sy = CABLE_LERP(port_y, ground_y, morph_p);
+  int mx = port_x, my = ground_y;
+  int ex = CABLE_LERP(-4, -(bounds_w + 20), morph_p);
+  int ey = ground_y;
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
   for (int pass = 0; pass < 2; pass++) {
@@ -575,6 +580,9 @@ static void car_anim_update(Animation *anim, const AnimationProgress progress) {
   if (s_ground_morph) {
     s_ground_morph_p = progress;
   }
+  if (s_anim_from_page == PAGE_CHARGE_TIME) {
+    s_cable_anim_p = progress;
+  }
   layer_mark_dirty(s_car_layer);
 }
 
@@ -615,10 +623,13 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   }
 #endif
 
-  if (s_page == PAGE_CHARGE_TIME && s_state.is_charging) {
+  bool show_cable = s_state.is_charging &&
+    (s_page == PAGE_CHARGE_TIME ||
+     (s_animating && s_anim_from_page == PAGE_CHARGE_TIME));
+  if (show_cable) {
     draw_charging_cable(ctx,
       (int)s_car_cur.x, (int)s_car_cur.y, cw, ch,
-      bounds.size.w, bounds.size.h);
+      bounds.size.w, bounds.size.h, s_cable_anim_p);
   }
 
   draw_icon_car(ctx,
@@ -1008,6 +1019,7 @@ static void update_page_indicator(void) {
 static void transition_stopped(Animation *anim, bool finished, void *context) {
   s_animating = false;
   s_ground_morph = false;
+  s_cable_anim_p = 0;
   if (s_anim_layer) {
     layer_remove_from_parent(s_anim_layer);
     layer_destroy(s_anim_layer);
