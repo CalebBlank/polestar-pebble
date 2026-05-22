@@ -484,9 +484,18 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int x = INSET_X + x_extra;
   int w = bounds.size.w - INSET_X * 2 - x_extra;
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
-  GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_60_NUMBERS_AM_PM : FONT_KEY_LECO_42_NUMBERS);
-  int num_h  = large ? 68 : 52;
-  int lbl_y  = y + (large ? 60 : 44);
+  GFont num_font;
+  int num_h, lbl_y;
+  if (large) {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_60_NUMBERS_AM_PM);
+    num_h = 68; lbl_y = y + 60;
+  } else if (strlen(number) > 5) {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
+    num_h = 36; lbl_y = y + 28;
+  } else {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+    num_h = 52; lbl_y = y + 44;
+  }
 #else
   GFont num_font = fonts_get_system_font(large ? FONT_KEY_LECO_42_NUMBERS : FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
   int num_h  = large ? 52 : 36;
@@ -814,11 +823,7 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
   int val = s_state.use_metric
     ? s_state.odo_km
     : (int)(s_state.odo_km * 621 / 1000);
-#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
-  snprintf(num, sizeof(num), "%d", val);
-#else
   snprintf(num, sizeof(num), "%07d", val);
-#endif
 #ifdef PBL_ROUND
   draw_big_stat(ctx, bounds, num,
     s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 0, 4);
