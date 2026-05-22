@@ -1046,10 +1046,10 @@ static void navigate(int dir) {
 
   PropertyAnimation *pa_in  = property_animation_create_layer_frame(s_canvas, &canvas_start, &canvas_end);
   PropertyAnimation *pa_out = property_animation_create_layer_frame(s_anim_layer, &anim_start, &anim_end);
-  animation_set_duration((Animation*)pa_in,  300);
+  animation_set_duration((Animation*)pa_in,  280);
   animation_set_curve((Animation*)pa_in,  AnimationCurveEaseInOut);
-  animation_set_duration((Animation*)pa_out, 260);
-  animation_set_curve((Animation*)pa_out, AnimationCurveEaseIn);
+  animation_set_duration((Animation*)pa_out, 280);
+  animation_set_curve((Animation*)pa_out, AnimationCurveEaseInOut);
 
   bool from_car = is_car_page(s_anim_from_page);
   bool to_car   = is_car_page(s_page);
@@ -1069,9 +1069,8 @@ static void navigate(int dir) {
 
   Animation *car_anim = animation_create();
   animation_set_implementation(car_anim, &s_car_anim_impl);
-  animation_set_duration(car_anim, 340);
-  animation_set_curve(car_anim, AnimationCurveCustomFunction);
-  animation_set_custom_curve(car_anim, spring_curve);
+  animation_set_duration(car_anim, 280);
+  animation_set_curve(car_anim, AnimationCurveEaseInOut);
 
   // Hide action bar during transition; re-added in transition_stopped if new page needs it
   Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, NULL);
