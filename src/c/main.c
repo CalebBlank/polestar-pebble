@@ -305,7 +305,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   int h = bounds.size.h;
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 3);
+  graphics_context_set_stroke_width(ctx, 4);
 
   {
     GPoint pts[] = {
@@ -375,7 +375,7 @@ static void draw_globe_and_car(GContext *ctx, GRect bounds) {
 
   // Car at 25° LEFT from top of globe, tilted -25° CCW (front/right tilts up)
 #if defined(PBL_PLATFORM_EMERY)
-  int car_w = w * 30 / 100;
+  int car_w = w * 36 / 100;
 #else
   int car_w = w * 42 / 100;
 #endif
@@ -402,7 +402,7 @@ static void draw_road_strip(GContext *ctx, GRect bounds) {
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_rect(ctx, GRect(0, y, bounds.size.w, strip_h), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 3);
+  graphics_context_set_stroke_width(ctx, 4);
   graphics_draw_line(ctx, GPoint(0, y), GPoint(bounds.size.w, y));
 }
 #endif
