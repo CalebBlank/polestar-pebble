@@ -307,19 +307,14 @@ static void draw_polyline(GContext *ctx, GPoint *pts, int n) {
   for (int i = 0; i < n - 1; i++) graphics_draw_line(ctx, pts[i], pts[i+1]);
 }
 
-// Draw two mountain peaks with chamfered tips and white snow caps.
+// Draw two mountain peaks with chamfered tips and white fill.
 static void draw_mountains(GContext *ctx, GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
   int mh1 = h * 32 / 100;
   int mh2 = h * 40 / 100;
 
-  // Mountain body: bg-color fill (orange) with black outline — shows silhouette
-#ifdef PBL_COLOR
-  graphics_context_set_fill_color(ctx, COLOR_BG);
-#else
   graphics_context_set_fill_color(ctx, COLOR_FG);
-#endif
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
 
@@ -356,79 +351,46 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     gpath_destroy(path);
   }
 
-#ifdef PBL_COLOR
-  // Snow cap: white fill from slope boundary up to peak chamfer
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  {
-    int t = 35;
-    int xl = w*29/100 - (w*29/100+5)*t/100;
-    int xr = w*29/100 + w*33/100*t/100;
-    int zy = h - mh1 + mh1*t/100;
-    GPoint sp[] = {{xl,       zy},
-                   {w*27/100, h-mh1+3}, {w*28/100, h-mh1+1},
-                   {w*29/100, h-mh1},
-                   {w*30/100, h-mh1+1}, {w*31/100, h-mh1+3},
-                   {xr,       zy}};
-    GPathInfo spi = {.num_points = 7, .points = sp};
-    GPath *sp2 = gpath_create(&spi);
-    gpath_draw_filled(ctx, sp2);
-    gpath_destroy(sp2);
-  }
-  {
-    int t = 35;
-    int xl = w*70/100 - w*37/100*t/100;
-    int xr = w*70/100 + (w*30/100+5)*t/100;
-    int zy = h - mh2 + mh2*t/100;
-    GPoint sp[] = {{xl,       zy},
-                   {w*68/100, h-mh2+4}, {w*69/100, h-mh2+1},
-                   {w*70/100, h-mh2},
-                   {w*71/100, h-mh2+1}, {w*72/100, h-mh2+4},
-                   {xr,       zy}};
-    GPathInfo spi = {.num_points = 7, .points = sp};
-    GPath *sp2 = gpath_create(&spi);
-    gpath_draw_filled(ctx, sp2);
-    gpath_destroy(sp2);
-  }
-#endif
-
-  // Snow line: slanted zigzag following the mountain slope, constrained within bounds
+  // Zigzag with segments parallel to mountain slopes:
+  // rising half-teeth use the left-slope ratio, falling use the right-slope ratio.
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
   {
-    // Mountain 1: peak at px=w*29/100. Left slope run = px+5, right slope run = w*33/100.
     int px = w*29/100, py = h-mh1;
     int ldx = px+5, rdx = w*33/100;
-    int amp = mh1/12;
-    // xl/xr inset so the -amp tooth exactly touches the mountain boundary
-    int xl = px - ldx*30/100 + ldx*amp/mh1 + 2;
-    int xr = px + rdx*55/100 - rdx*amp/mh1 - 2;
-    int zy_l = py + mh1*30/100;
-    int zy_r = py + mh1*55/100;
+    int amp = mh1/10;
+    int dx_rise = amp * ldx / mh1;
+    int dx_fall = amp * rdx / mh1;
+    int n = 5;
+    int xl = px - n * (dx_rise + dx_fall) / 2;
+    int zy = py + mh1*40/100;
     GPoint prev = {0, 0};
-    for (int i = 0; i <= 6; i++) {
-      int x  = xl + (xr - xl) * i / 6;
-      int zy = zy_l + (zy_r - zy_l) * i / 6;
-      GPoint pt = {(int16_t)x, (int16_t)(zy + (i % 2 == 0 ? -amp : amp))};
+    int x = xl, y = zy + amp;
+    for (int i = 0; i <= 2 * n; i++) {
+      GPoint pt = {(int16_t)x, (int16_t)y};
       if (i > 0) graphics_draw_line(ctx, prev, pt);
       prev = pt;
+      if (i % 2 == 0) { x += dx_rise; y = zy - amp; }
+      else             { x += dx_fall; y = zy + amp; }
     }
   }
   {
-    // Mountain 2: peak at px=w*70/100. Left slope run = w*37/100, right slope run = w*30/100+5.
     int px = w*70/100, py = h-mh2;
     int ldx = w*37/100, rdx = w*30/100+5;
-    int amp = mh2/12;
-    int xl = px - ldx*30/100 + ldx*amp/mh2 + 2;
-    int xr = px + rdx*55/100 - rdx*amp/mh2 - 2;
-    int zy_l = py + mh2*30/100;
-    int zy_r = py + mh2*55/100;
+    int amp = mh2/10;
+    int dx_rise = amp * ldx / mh2;
+    int dx_fall = amp * rdx / mh2;
+    int n = 5;
+    int xl = px - n * (dx_rise + dx_fall) / 2;
+    int zy = py + mh2*40/100;
     GPoint prev = {0, 0};
-    for (int i = 0; i <= 6; i++) {
-      int x  = xl + (xr - xl) * i / 6;
-      int zy = zy_l + (zy_r - zy_l) * i / 6;
-      GPoint pt = {(int16_t)x, (int16_t)(zy + (i % 2 == 0 ? -amp : amp))};
+    int x = xl, y = zy + amp;
+    for (int i = 0; i <= 2 * n; i++) {
+      GPoint pt = {(int16_t)x, (int16_t)y};
       if (i > 0) graphics_draw_line(ctx, prev, pt);
       prev = pt;
+      if (i % 2 == 0) { x += dx_rise; y = zy - amp; }
+      else             { x += dx_fall; y = zy + amp; }
     }
   }
 }
@@ -546,7 +508,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
 
   switch (page) {
     case PAGE_CHARGE_TIME: {
-      int cw = w * 85 / 100;
+      int cw = w * 110 / 100;
       int ch = cw * 72 / 161;
       t.w = cw;
       t.x = w - cw / 2;  // center of car at right edge — half off screen
@@ -570,7 +532,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
       break;
     }
     case PAGE_RANGE: {
-      int cw = w * 55 / 100;
+      int cw = w * 42 / 100;
       int ch = cw * 72 / 161;
       t.w = cw;
       t.x = w / 2 - cw / 2;
@@ -583,11 +545,11 @@ static CarState car_target_for_page(int page, GRect bounds) {
     }
     case PAGE_ODO: {
 #if defined(PBL_PLATFORM_EMERY)
-      int cw = w * 40 / 100;
+      int cw = w * 30 / 100;
 #elif defined(PBL_PLATFORM_CHALK)
-      int cw = w * 35 / 100;
+      int cw = w * 26 / 100;
 #else
-      int cw = w * 36 / 100;
+      int cw = w * 27 / 100;
 #endif
       int ch  = cw * 72 / 161;
       int gr  = w * 52 / 100;
@@ -914,7 +876,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   // Semi-circle on right edge indicating an action menu is available on select
   if (page == PAGE_CLIMATE || page == PAGE_LOCK || page == PAGE_LOCATION) {
     graphics_context_set_fill_color(ctx, COLOR_DARK);
-    graphics_fill_circle(ctx, GPoint(bounds.size.w, bounds.size.h / 2), 16);
+    graphics_fill_circle(ctx, GPoint(bounds.size.w + 6, bounds.size.h / 2), 16);
   }
 }
 
