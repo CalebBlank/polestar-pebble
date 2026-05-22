@@ -13,7 +13,14 @@
     "capabilities": ["configurable", "location"],
     "targetPlatforms": ["basalt", "chalk", "diorite", "emery", "gabbro"],
     "resources": {
-      "media": []
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "IMAGE_MENU_ICON",
+          "file": "images/icon.png",
+          "menuIcon": true
+        }
+      ]
     },
     "messageKeys": {
       "CMD": 0,

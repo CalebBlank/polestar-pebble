@@ -104,9 +104,6 @@ static Layer            *s_canvas;
 static StatusBarLayer   *s_status_bar;
 static TextLayer        *s_page_label;
 static char              s_page_buf[8];
-static SimpleMenuLayer  *s_action_menu_layer;
-static Window           *s_action_window;
-static int               s_action_pending  = -1;
 static bool              s_animating       = false;
 static Layer            *s_anim_layer      = NULL;
 static int               s_anim_from_page  = 0;
@@ -118,78 +115,6 @@ static bool              s_ground_morph     = false;
 static int32_t           s_ground_morph_p   = 0;
 static bool              s_globe_spinning   = false;
 static int32_t           s_globe_rot        = 0;
-static ActionBarLayer   *s_action_bar  = NULL;
-static GBitmap          *s_icon_up     = NULL;
-static GBitmap          *s_icon_select = NULL;
-static GBitmap          *s_icon_down   = NULL;
-
-// ── Action bar ────────────────────────────────────────────────────────────────
-
-static bool page_has_affordance(int page) {
-  return page == PAGE_CLIMATE || page == PAGE_LOCK || page == PAGE_LOCATION;
-}
-
-// On color platforms use 8-bit format (GColor8: AARRGGBB packed, 0xFF=white opaque,
-// 0x00=transparent). On B&W platforms fall back to 1-bit.
-#ifdef PBL_COLOR
-  #define ICON_FORMAT GBitmapFormat8Bit
-  static void set_icon_pixel(uint8_t *data, int stride, int x, int y, uint8_t color) {
-    data[y * stride + x] = color;
-  }
-  // white opaque
-  #define ICON_FG 0xFF
-#else
-  #define ICON_FORMAT GBitmapFormat1Bit
-  static void set_icon_pixel(uint8_t *data, int stride, int x, int y, uint8_t color) {
-    (void)color;
-    data[y * stride + x / 8] |= (uint8_t)(1 << (x % 8));
-  }
-  #define ICON_FG 1
-#endif
-
-static GBitmap *icon_blank(void) {
-  GBitmap *bmp = gbitmap_create_blank(GSize(18, 18), ICON_FORMAT);
-  if (!bmp) return NULL;
-  memset(gbitmap_get_data(bmp), 0, (size_t)(18 * gbitmap_get_bytes_per_row(bmp)));
-  return bmp;
-}
-
-static GBitmap *create_icon_up(void) {
-  GBitmap *bmp = icon_blank();
-  if (!bmp) return NULL;
-  uint8_t *data = gbitmap_get_data(bmp);
-  int stride = gbitmap_get_bytes_per_row(bmp);
-  for (int r = 6; r <= 11; r++) {
-    for (int c = 15 - r; c <= r + 3; c++) set_icon_pixel(data, stride, c, r, ICON_FG);
-  }
-  return bmp;
-}
-
-static GBitmap *create_icon_down(void) {
-  GBitmap *bmp = icon_blank();
-  if (!bmp) return NULL;
-  uint8_t *data = gbitmap_get_data(bmp);
-  int stride = gbitmap_get_bytes_per_row(bmp);
-  for (int r = 6; r <= 11; r++) {
-    for (int c = r - 2; c <= 20 - r; c++) set_icon_pixel(data, stride, c, r, ICON_FG);
-  }
-  return bmp;
-}
-
-static GBitmap *create_icon_select(void) {
-  GBitmap *bmp = icon_blank();
-  if (!bmp) return NULL;
-  uint8_t *data = gbitmap_get_data(bmp);
-  int stride = gbitmap_get_bytes_per_row(bmp);
-  int dot_xs[] = {2, 8, 14};
-  for (int i = 0; i < 3; i++) {
-    for (int dy = 0; dy < 2; dy++) {
-      for (int dx = 0; dx < 2; dx++) set_icon_pixel(data, stride, dot_xs[i] + dx, 8 + dy, ICON_FG);
-    }
-  }
-  return bmp;
-}
-
 // ── Icon drawing ──────────────────────────────────────────────────────────────
 
 static void icon_fill(GContext *ctx) {
@@ -458,12 +383,10 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   }
 }
 
-static GPoint globe_pt(int gx, int gy, int gr, int sx, int sy) {
+static GPoint globe_pt(int gx, int gy, int gr, int sx, int sy, int32_t ca, int32_t sa) {
   int rx = (sx - 152) * gr / 149;
   int ry = (sy - 152) * gr / 149;
-  if (s_globe_rot == 0) return GPoint(gx + rx, gy + ry);
-  int32_t ca = cos_lookup(s_globe_rot);
-  int32_t sa = sin_lookup(s_globe_rot);
+  if (sa == 0) return GPoint(gx + rx, gy + ry);
   int rotx = (int)((int64_t)rx * ca / TRIG_MAX_RATIO - (int64_t)ry * sa / TRIG_MAX_RATIO);
   int roty = (int)((int64_t)rx * sa / TRIG_MAX_RATIO + (int64_t)ry * ca / TRIG_MAX_RATIO);
   return GPoint(gx + rotx, gy + roty);
@@ -488,7 +411,9 @@ static void draw_globe(GContext *ctx, GRect bounds) {
 
   // Globe lines from Globe.svg (303×303, center 152,152, radius 149)
   // Screen point: gx + (sx-152)*gr/149, gy + (sy-152)*gr/149
-  #define GP(sx,sy) globe_pt(gx, gy, gr, sx, sy)
+  int32_t g_ca = cos_lookup(s_globe_rot);
+  int32_t g_sa = sin_lookup(s_globe_rot);
+  #define GP(sx,sy) globe_pt(gx, gy, gr, sx, sy, g_ca, g_sa)
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, 4);
   { GPoint p[] = { GP(28,68), GP(62,97), GP(65,126), GP(90,150), GP(93,182), GP(27,228) };
@@ -652,7 +577,6 @@ static void car_anim_update(Animation *anim, const AnimationProgress progress) {
   s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[1].rot, progress);
   if (s_ground_morph) {
     s_ground_morph_p = progress;
-    if (progress >= ANIMATION_NORMALIZED_MAX) s_ground_morph = false;
   }
   layer_mark_dirty(s_car_layer);
 }
@@ -661,9 +585,10 @@ static const AnimationImplementation s_car_anim_impl = { .update = car_anim_upda
 
 static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   if (s_car_cur.w <= 0) return;
+  GRect bounds = layer_get_bounds(layer);
+  if ((int)s_car_cur.y >= bounds.size.h) return;  // parked off-screen below
   int cw = (int)s_car_cur.w;
   int ch = cw * 72 / 161;
-  GRect bounds = layer_get_bounds(layer);
 
 #ifdef PBL_ROUND
   if (s_ground_morph) {
@@ -982,92 +907,54 @@ static void inbox_dropped(AppMessageResult reason, void *context) {
   APP_LOG(APP_LOG_LEVEL_ERROR, "Inbox dropped: %d", (int)reason);
 }
 
-// ── Location action menu ──────────────────────────────────────────────────────
+// ── Action menu ───────────────────────────────────────────────────────────────
 
-static void do_action_cb(void *data) {
-  if (!s_action_window) { s_action_pending = -1; return; }  // already dismissed
-  switch (s_action_pending) {
-    case PAGE_CLIMATE:
-      s_state.climate_on = !s_state.climate_on;
-      send_cmd(CMD_TOGGLE_CLIMATE);
-      break;
-    case PAGE_LOCK:
-      s_state.locked = !s_state.locked;
-      send_cmd(CMD_TOGGLE_LOCK);
-      break;
-    case PAGE_LOCATION:
-      vibes_short_pulse();
-      send_cmd(CMD_HONK);
-      break;
-    default:
-      break;
+static void action_performed(ActionMenu *menu, const ActionMenuItem *item, void *context) {
+  int act = (int)(intptr_t)action_menu_item_get_action_data(item);
+  switch (act) {
+    case 0: s_state.climate_on = !s_state.climate_on; send_cmd(CMD_TOGGLE_CLIMATE); break;
+    case 1: s_state.locked     = !s_state.locked;     send_cmd(CMD_TOGGLE_LOCK);    break;
+    case 2: vibes_short_pulse(); send_cmd(CMD_HONK); break;
+    case 3: send_cmd(CMD_NAVIGATE); break;
   }
-  s_action_pending = -1;
-  window_stack_pop(false);   // non-animated: window unloads synchronously
-  layer_mark_dirty(s_canvas); // force redraw with new state
+  layer_mark_dirty(s_canvas);
 }
 
-static void action_menu_select_cb(int index, void *context) {
-  s_action_pending = s_page;
-  app_timer_register(50, do_action_cb, NULL);
-}
-
-static void do_navigate_cb(void *data) {
-  if (!s_action_window) return;
-  send_cmd(CMD_NAVIGATE);
-  window_stack_pop(false);
-}
-
-static void navigate_select_cb(int index, void *context) {
-  app_timer_register(50, do_navigate_cb, NULL);
-}
-
-static void action_window_load(Window *window) {
-  Layer *root   = window_get_root_layer(window);
-  GRect  bounds = layer_get_bounds(root);
-
-  static SimpleMenuItem climate_items[] = {
-    { .title = "Toggle Climate", .subtitle = "Turn climate on/off", .callback = action_menu_select_cb },
-  };
-  static SimpleMenuItem lock_items[] = {
-    { .title = "Toggle Lock", .subtitle = "Lock or unlock car", .callback = action_menu_select_cb },
-  };
-  static SimpleMenuItem location_items[] = {
-    { .title = "Honk + Flash", .subtitle = "Locate your car",     .callback = action_menu_select_cb },
-    { .title = "Navigate",     .subtitle = "Open maps on phone",  .callback = navigate_select_cb   },
-  };
-  static SimpleMenuSection sections[1];
-
-  switch (s_page) {
-    case PAGE_CLIMATE:
-      sections[0] = (SimpleMenuSection){ .title = "Climate", .items = climate_items,  .num_items = 1 };
-      break;
-    case PAGE_LOCK:
-      sections[0] = (SimpleMenuSection){ .title = "Lock",    .items = lock_items,     .num_items = 1 };
-      break;
-    default:
-      sections[0] = (SimpleMenuSection){ .title = "Actions", .items = location_items, .num_items = 2 };
-      break;
-  }
-
-  s_action_menu_layer = simple_menu_layer_create(bounds, window, sections, 1, NULL);
-  layer_add_child(root, simple_menu_layer_get_layer(s_action_menu_layer));
-}
-
-static void action_window_unload(Window *window) {
-  simple_menu_layer_destroy(s_action_menu_layer);
-  s_action_menu_layer = NULL;
-  window_destroy(s_action_window);
-  s_action_window = NULL;
+static void action_menu_did_close(ActionMenu *menu, const ActionMenuItem *item, void *context) {
+  action_menu_hierarchy_destroy(action_menu_get_root_level(menu), NULL, NULL);
 }
 
 static void open_action_menu(void) {
-  s_action_window = window_create();
-  window_set_window_handlers(s_action_window, (WindowHandlers){
-    .load   = action_window_load,
-    .unload = action_window_unload,
-  });
-  window_stack_push(s_action_window, true);
+  ActionMenuLevel *root;
+  switch (s_page) {
+    case PAGE_CLIMATE:
+      root = action_menu_level_create(1);
+      action_menu_level_add_action(root,
+        s_state.climate_on ? "Turn Off" : "Turn On",
+        action_performed, (void*)(intptr_t)0);
+      break;
+    case PAGE_LOCK:
+      root = action_menu_level_create(1);
+      action_menu_level_add_action(root,
+        s_state.locked ? "Unlock" : "Lock",
+        action_performed, (void*)(intptr_t)1);
+      break;
+    default: // PAGE_LOCATION
+      root = action_menu_level_create(2);
+      action_menu_level_add_action(root, "Honk + Flash", action_performed, (void*)(intptr_t)2);
+      action_menu_level_add_action(root, "Navigate",     action_performed, (void*)(intptr_t)3);
+      break;
+  }
+  ActionMenuConfig config = {
+    .root_level = root,
+    .did_close  = action_menu_did_close,
+    .colors     = {
+      .background = PBL_IF_COLOR_ELSE(COLOR_BG, GColorBlack),
+      .foreground = PBL_IF_COLOR_ELSE(GColorBlack, GColorWhite),
+    },
+    .align = ActionMenuAlignTop,
+  };
+  action_menu_open(&config);
 }
 
 // ── Globe spin ────────────────────────────────────────────────────────────────
@@ -1123,6 +1010,7 @@ static void update_page_indicator(void) {
 
 static void transition_stopped(Animation *anim, bool finished, void *context) {
   s_animating = false;
+  s_ground_morph = false;
   if (s_anim_layer) {
     layer_remove_from_parent(s_anim_layer);
     layer_destroy(s_anim_layer);
@@ -1130,10 +1018,6 @@ static void transition_stopped(Animation *anim, bool finished, void *context) {
   }
   GRect r = layer_get_bounds(window_get_root_layer(s_window));
   layer_set_frame(s_canvas, r);
-
-  if (page_has_affordance(s_page)) {
-    action_bar_layer_add_to_window(s_action_bar, s_window);
-  }
 }
 
 static void navigate(int dir) {
@@ -1191,10 +1075,6 @@ static void navigate(int dir) {
   animation_set_custom_curve(car_anim, spring_curve);
 
   // Hide action bar during transition; re-added in transition_stopped if new page needs it
-  if (page_has_affordance(s_anim_from_page)) {
-    action_bar_layer_remove_from_window(s_action_bar);
-  }
-
   Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, NULL);
   animation_set_handlers(spawn, (AnimationHandlers){ .stopped = transition_stopped }, NULL);
   animation_schedule(spawn);
@@ -1259,19 +1139,6 @@ static void window_load(Window *window) {
   layer_set_update_proc(s_car_layer, car_layer_update_proc);
   layer_add_child(root, s_car_layer);
 
-  // Action bar for action pages (climate, lock, location)
-  s_icon_up     = create_icon_up();
-  s_icon_select = create_icon_select();
-  s_icon_down   = create_icon_down();
-  s_action_bar  = action_bar_layer_create();
-  action_bar_layer_set_click_config_provider(s_action_bar, click_config_provider);
-  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_UP,     s_icon_up);
-  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_SELECT, s_icon_select);
-  action_bar_layer_set_icon(s_action_bar, BUTTON_ID_DOWN,   s_icon_down);
-  if (page_has_affordance(s_page)) {
-    action_bar_layer_add_to_window(s_action_bar, s_window);
-  }
-
   // Native status bar — auto-updates time, orange bg, white fg, no separator
   s_status_bar = status_bar_layer_create();
   status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_FG);
@@ -1297,11 +1164,6 @@ static void window_unload(Window *window) {
   accel_tap_service_unsubscribe();
   layer_destroy(s_canvas);
   layer_destroy(s_car_layer);
-  action_bar_layer_remove_from_window(s_action_bar);
-  action_bar_layer_destroy(s_action_bar);
-  gbitmap_destroy(s_icon_up);
-  gbitmap_destroy(s_icon_select);
-  gbitmap_destroy(s_icon_down);
   status_bar_layer_destroy(s_status_bar);
   text_layer_destroy(s_page_label);
 }
