@@ -600,11 +600,11 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   int digit_w  = 40;
   int glyph_sz = 24;
-  int glyph_y  = CONTENT_Y + 16;
+  int glyph_y  = CONTENT_Y + 17;
 #else
   int digit_w  = 30;
   int glyph_sz = 18;
-  int glyph_y  = CONTENT_Y + 12;
+  int glyph_y  = CONTENT_Y + 13;
 #endif
   draw_percent_glyph(ctx,
     GPoint(INSET_X + digits * digit_w + 1, glyph_y),
