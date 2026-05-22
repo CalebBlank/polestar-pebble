@@ -90,7 +90,7 @@ static struct {
   .charge_pct   = 80,
   .range_km     = 180,
   .odo_km       = 12305,
-  .location     = "136 S Ash St, Palatine IL",
+  .location     = "136 S Ash St\nPalatine, IL",
   .outside_temp = 60,
   .is_charging  = true,
   .use_metric   = false,
@@ -128,7 +128,7 @@ static void icon_stroke(GContext *ctx) {
 // Path points are centered around the body pivot so gpath_rotate_to works correctly.
 static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle, int wheel_r_override) {
   int x = r.origin.x, y = r.origin.y, w = r.size.w, h = r.size.h;
-  int wheel_r = wheel_r_override > 0 ? wheel_r_override : MAX(h / 4, 10);
+  int wheel_r = wheel_r_override > 0 ? wheel_r_override : MAX(h / 5, 8);
   int body_h  = h - wheel_r;
   // Pivot = center of car body rectangle
   int pcx = w / 2;
@@ -484,7 +484,11 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
   int div_y = bounds.size.h - 60;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
+#ifdef PBL_ROUND
   graphics_draw_line(ctx, GPoint(INSET_X + 8, div_y), GPoint(bounds.size.w - INSET_X - 8, div_y));
+#else
+  graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
+#endif
 
   char temp_buf[24];
   if (s_state.use_metric) {
@@ -493,9 +497,15 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
   } else {
     snprintf(temp_buf, sizeof(temp_buf), "%d\xC2\xB0""F outside", s_state.outside_temp);
   }
+#ifdef PBL_ROUND
   draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, div_y + 8, w, 36),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 8);
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 8);
+#else
+  draw_text(ctx, temp_buf, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, div_y + 8, w, 36),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
+#endif
   draw_action_affordance(ctx, bounds);
 }
 
@@ -640,16 +650,20 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
   draw_text(ctx, s_state.location,
             fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
             GRect(INSET_X, y, w, 80),
-            GTextOverflowModeWordWrap, GTextAlignmentLeft, 0);
+            GTextOverflowModeWordWrap, GTextAlignmentLeft, 8);
   draw_text(ctx, "current location",
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 80, w, 32),
+            GRect(INSET_X, y + 64, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
   int div_y = bounds.size.h - 60;
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, 2);
+#ifdef PBL_ROUND
   graphics_draw_line(ctx, GPoint(INSET_X + 8, div_y), GPoint(bounds.size.w - INSET_X - 8, div_y));
+#else
+  graphics_draw_line(ctx, GPoint(INSET_X, div_y), GPoint(bounds.size.w - INSET_X, div_y));
+#endif
 
   char dist_buf[32];
   if (s_state.distance_m < 0) {
@@ -671,10 +685,17 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
       snprintf(dist_buf, sizeof(dist_buf), "%d.%d mi away", mi_whole, mi_frac);
     }
   }
+#ifdef PBL_ROUND
   draw_text(ctx, dist_buf,
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, div_y + 8, w, 36),
-            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 8);
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, 8);
+#else
+  draw_text(ctx, dist_buf,
+            fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
+            GRect(INSET_X, div_y + 8, w, 36),
+            GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
+#endif
   draw_action_affordance(ctx, bounds);
 }
 

@@ -124,16 +124,13 @@ function reverseGeocode(lat, lon, callback) {
     if (xhr.status === 200) {
       var data = JSON.parse(xhr.responseText);
       var addr = data.address || {};
-      var parts = [];
-      if (addr.house_number && addr.road)
-        parts.push(addr.house_number + ' ' + addr.road);
-      else if (addr.road)
-        parts.push(addr.road);
-      if (addr.city || addr.town || addr.village)
-        parts.push(addr.city || addr.town || addr.village);
-      if (addr.state && addr.postcode)
-        parts.push(addr.state + ' ' + addr.postcode);
-      callback(parts.join(', ') || data.display_name || 'Unknown');
+      var street = addr.house_number && addr.road
+        ? addr.house_number + ' ' + addr.road
+        : (addr.road || '');
+      var city  = addr.city || addr.town || addr.village || '';
+      var state = addr.state || '';
+      var cityState = city && state ? city + ', ' + state : (city || state);
+      callback((street ? street + '\n' : '') + (cityState || data.display_name || 'Unknown'));
     } else {
       callback('Location unavailable');
     }
@@ -284,7 +281,7 @@ function sendMockData() {
   msg[KEY_STATE_CHARGE_PCT]  = 80;
   msg[KEY_STATE_RANGE_KM]    = 180;
   msg[KEY_STATE_ODO_KM]      = 12305;
-  msg[KEY_STATE_LOCATION]    = '136 S Ash St, Palatine IL';
+  msg[KEY_STATE_LOCATION]    = '136 S Ash St\nPalatine, IL';
   msg[KEY_STATE_OUTSIDE_TEMP]= 60;
   msg[KEY_SETTING_UNITS]     = 1;
   msg[KEY_STATE_DISTANCE_M]  = 2200;
