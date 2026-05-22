@@ -1046,9 +1046,8 @@ static void navigate(int dir) {
 
   PropertyAnimation *pa_in  = property_animation_create_layer_frame(s_canvas, &canvas_start, &canvas_end);
   PropertyAnimation *pa_out = property_animation_create_layer_frame(s_anim_layer, &anim_start, &anim_end);
-  animation_set_duration((Animation*)pa_in,  320);
-  animation_set_curve((Animation*)pa_in,  AnimationCurveCustomFunction);
-  animation_set_custom_curve((Animation*)pa_in,  spring_curve);
+  animation_set_duration((Animation*)pa_in,  300);
+  animation_set_curve((Animation*)pa_in,  AnimationCurveEaseInOut);
   animation_set_duration((Animation*)pa_out, 260);
   animation_set_curve((Animation*)pa_out, AnimationCurveEaseIn);
 
