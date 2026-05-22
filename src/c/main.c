@@ -206,30 +206,35 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int arc_cx = locked ? cx : cx + bw * 2;
   int arc_cy = by - arm_h;
 
-  // Shackle arms (filled rects with black outline, extend from arc center down to body top)
+  // Shackle: draw black outline layer first, then white fill on top.
+  int ol = 3;  // outline thickness in px
+  GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
+
+  // --- Black outline pass ---
+  graphics_context_set_fill_color(ctx, COLOR_DARK);
+  graphics_fill_rect(ctx,
+    GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, by - arc_cy + ol), 0, GCornerNone);
+  graphics_fill_rect(ctx,
+    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, by - arc_cy + ol), 0, GCornerNone);
+  graphics_context_set_stroke_color(ctx, COLOR_DARK);
+  graphics_context_set_stroke_width(ctx, arm_sw + ol * 2);
+  graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
+                    DEG_TO_TRIGANGLE(270), DEG_TO_TRIGANGLE(360));
+  graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
+                    DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
+
+  // --- White fill pass ---
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_rect(ctx,
-    GRect(arc_cx - arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0, GCornerNone);
+    GRect(arc_cx - arc_r - arm_sw/2, arc_cy, arm_sw, by - arc_cy + ol), 0, GCornerNone);
   graphics_fill_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0, GCornerNone);
-  graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 3);
-  graphics_draw_round_rect(ctx,
-    GRect(arc_cx - arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0);
-  graphics_draw_round_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw / 2, arc_cy, arm_sw, by - arc_cy + 2), 0);
-
-  // Shackle arc: top semicircle drawn as two 90° quarters to avoid wrap-around issues.
-  // 270°→360° = left quarter (9→12 o'clock), 0°→90° = right quarter (12→3 o'clock).
+    GRect(arc_cx + arc_r - arm_sw/2, arc_cy, arm_sw, by - arc_cy + ol), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_FG);
   graphics_context_set_stroke_width(ctx, arm_sw);
-  {
-    GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
-    graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
-                      DEG_TO_TRIGANGLE(270), DEG_TO_TRIGANGLE(360));
-    graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
-                      DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
-  }
+  graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
+                    DEG_TO_TRIGANGLE(270), DEG_TO_TRIGANGLE(360));
+  graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
+                    DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
 
   // Lock body: white fill + black outline
   icon_fill(ctx);
@@ -499,7 +504,7 @@ static void draw_page_range(GContext *ctx, GRect bounds) {
     int car_w = 140;
     int car_h = 54;
     int car_x = bounds.size.w / 2 - car_w / 2;
-    int car_y = bounds.size.h - car_h - 24;
+    int car_y = bounds.size.h - car_h - 14;  // same offset as draw_car_bottom so wheels sit in road strip
     draw_icon_car(ctx, GRect(car_x, car_y, car_w, car_h));
   }
 #ifdef PBL_ROUND
@@ -603,6 +608,7 @@ static void inbox_dropped(AppMessageResult reason, void *context) {
 // ── Location action menu ──────────────────────────────────────────────────────
 
 static void do_action_cb(void *data) {
+  if (!s_action_window) { s_action_pending = -1; return; }  // already dismissed
   switch (s_action_pending) {
     case PAGE_CLIMATE:
       s_state.climate_on = !s_state.climate_on;
@@ -620,7 +626,8 @@ static void do_action_cb(void *data) {
       break;
   }
   s_action_pending = -1;
-  window_stack_pop(true);
+  window_stack_pop(false);   // non-animated: window unloads synchronously
+  layer_mark_dirty(s_canvas); // force redraw with new state
 }
 
 static void action_menu_select_cb(int index, void *context) {
