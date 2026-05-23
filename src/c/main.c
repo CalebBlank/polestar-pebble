@@ -207,7 +207,6 @@ static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle, int wheel_r
 static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
                                 int car_w, int car_h, int bounds_w, int bounds_h,
                                 int32_t morph_p) {
-  (void)bounds_w;
 #define CABLE_LERP(a,b,p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
@@ -223,14 +222,14 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   int sx = port_x;
   int sy = (int)CABLE_LERP(port_y, ground_y, morph_p);
   // End: off-screen left at ground level
-  int ex = (int)CABLE_LERP(-8, -(car_x + car_w + 20), morph_p);
+  int ex = (int)CABLE_LERP(-10, -(car_x + car_w + 20), morph_p);
   int ey = ground_y;
-  // c1: pull left from start so cable initially exits leftward
-  int c1x = sx - (int)CABLE_LERP(40, 10, morph_p);
-  int c1y = sy;
-  // c2: approach end from above so cable curves down before going flat
-  int c2x = ex + (int)CABLE_LERP(30, 8, morph_p);
-  int c2y = ey - (int)CABLE_LERP(28, 4, morph_p);
+  // c1: exit port going LEFT with gentle downward pull
+  int c1x = sx - (int)CABLE_LERP(30, 8, morph_p);
+  int c1y = sy + (int)CABLE_LERP((ground_y - port_y) / 4, 0, morph_p);
+  // c2: at ~1/4 screen width, at ground level → creates visible flat section before left edge
+  int c2x = (int)CABLE_LERP(bounds_w / 4, ex + 10, morph_p);
+  int c2y = ey;
 
   // Two-pass: black outline first, white fill on top
   for (int pass = 0; pass < 2; pass++) {
@@ -342,9 +341,8 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   int mh2 = h * 40 / 100;
   int px1 = w * 29 / 100;
   int px2 = w * 70 / 100;
-  // Cap slopes so they stay within canvas bounds — prevents outline clipping at edges
-  int run1 = MIN(mh1 * 15 / 13, px1 - 2);
-  int run2 = MIN(mh2 * 15 / 13, w - px2 - 2);
+  int run1 = mh1 * 15 / 13;
+  int run2 = mh2 * 15 / 13;
 
   graphics_context_set_fill_color(ctx, COLOR_FG);
 
@@ -653,13 +651,6 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_fill_circle(ctx, GPoint(hint_x, bounds.size.h / 2), 16);
   }
 
-  // Globe lives on the car_layer (full-screen, non-sliding) to avoid canvas edge clipping
-  bool on_odo   = (s_page == PAGE_ODO);
-  bool from_odo = s_animating && (s_anim_from_page == PAGE_ODO);
-  if ((on_odo || from_odo) && !s_ground_morph) {
-    draw_globe(ctx, bounds);
-  }
-
   if (s_car_cur.w <= 0) return;
   if ((int)s_car_cur.y >= bounds.size.h) return;  // parked off-screen below
   int cw = (int)s_car_cur.w;
@@ -855,14 +846,9 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
     ? s_state.odo_km
     : (int)(s_state.odo_km * 621 / 1000);
   snprintf(num, sizeof(num), "%07d", val);
-#ifdef PBL_ROUND
   draw_big_stat(ctx, bounds, num,
     s_state.use_metric ? "kilometers\ndriven" : "miles driven", false, 0, 4);
-#else
-  draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometers\ndriven" : "miles driven", false, 0, 4);
-#endif
-
+  if (!s_ground_morph) draw_globe(ctx, bounds);
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
@@ -1091,12 +1077,12 @@ static void open_action_menu(void) {
 
 static void globe_spin_update(Animation *anim, const AnimationProgress progress) {
   s_globe_rot = -(int32_t)((int64_t)TRIG_MAX_ANGLE * progress / ANIMATION_NORMALIZED_MAX);
-  layer_mark_dirty(s_car_layer);
+  layer_mark_dirty(s_canvas);
 }
 static void globe_spin_stopped(Animation *anim, bool finished, void *context) {
   s_globe_spinning = false;
   s_globe_rot = 0;
-  layer_mark_dirty(s_car_layer);
+  layer_mark_dirty(s_canvas);
 }
 static const AnimationImplementation s_globe_spin_impl = { .update = globe_spin_update };
 
@@ -1113,13 +1099,13 @@ static const AnimationImplementation s_lock_shake_impl = { .update = lock_shake_
 
 static void globe_intro_update(Animation *anim, const AnimationProgress progress) {
   s_globe_rot = -(int32_t)((int64_t)(TRIG_MAX_ANGLE / 12) * progress / ANIMATION_NORMALIZED_MAX);
-  layer_mark_dirty(s_car_layer);
+  layer_mark_dirty(s_canvas);
 }
 static const AnimationImplementation s_globe_intro_impl = { .update = globe_intro_update };
 
 static void globe_intro_rev_update(Animation *anim, const AnimationProgress progress) {
   s_globe_rot = (int32_t)((int64_t)(TRIG_MAX_ANGLE / 12) * progress / ANIMATION_NORMALIZED_MAX);
-  layer_mark_dirty(s_car_layer);
+  layer_mark_dirty(s_canvas);
 }
 static const AnimationImplementation s_globe_intro_rev_impl = { .update = globe_intro_rev_update };
 

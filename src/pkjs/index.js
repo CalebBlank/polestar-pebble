@@ -153,13 +153,15 @@ function authenticate(callback) {
   xhr1.open('GET', authUrl, true);
   xhr1.onload = function() {
     var html = xhr1.responseText;
-    // Extract PingFederate resume/form action path
-    var match = html.match(/(?:url|action):\s*"([^"]+)"/);
-    if (!match) { callback(new Error('Auth: no resume path')); return; }
+    // PingFederate embeds the resume path as JS (url:"...") or HTML form action="..."
+    var match = html.match(/(?:url|action):\s*"([^"]+)"/)
+             || html.match(/action="([^"]*(?:resume|ping|authorization)[^"]*)"/i)
+             || html.match(/action="([^"]+)"/);
+    if (!match) { callback(new Error('Auth: no resume path in login page')); return; }
     var resumePath = match[1];
-    if (resumePath.charAt(0) === '/') resumePath = AUTH_BASE + resumePath;
+    if (/^\//.test(resumePath)) resumePath = AUTH_BASE + resumePath;
 
-    // Step 2: POST credentials
+    // Step 2: POST credentials to PingFederate
     var body = 'pf.username=' + encodeURIComponent(s_username)
              + '&pf.pass='    + encodeURIComponent(s_password)
              + '&client_id='  + CLIENT_ID;
@@ -167,10 +169,14 @@ function authenticate(callback) {
     xhr2.open('POST', resumePath, true);
     xhr2.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     xhr2.onload = function() {
-      // After redirects, responseURL ends up at REDIRECT_URI?code=...
-      var finalUrl = xhr2.responseURL || '';
+      // After redirects, responseURL should be REDIRECT_URI?code=...
+      var finalUrl = (typeof xhr2.responseURL === 'string') ? xhr2.responseURL : '';
       var codeMatch = finalUrl.match(/[?&]code=([^&#]+)/);
-      if (!codeMatch) { callback(new Error('Auth: no code in redirect')); return; }
+      if (!codeMatch) {
+        // Fallback: search response text for the code (callback page may echo it)
+        codeMatch = (xhr2.responseText || '').match(/[?&]code=([A-Za-z0-9._-]{10,})/);
+      }
+      if (!codeMatch) { callback(new Error('Auth: no code (url=' + finalUrl.slice(0,80) + ')')); return; }
       var code = codeMatch[1];
 
       // Step 3: Exchange code for token
