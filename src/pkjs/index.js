@@ -251,7 +251,8 @@ function handleCmd(cmd) {
 
   if (cmd === CMD_REFRESH) {
     getStoredCreds();
-    if (!s_username || !s_password) { sendMockData(); return; }
+    var debugMock = localStorage.getItem('debug_mock') === 'true';
+    if (debugMock || !s_username || !s_password) { sendMockData(); return; }
     fetchAndSend();
     return;
   }
@@ -359,11 +360,12 @@ Pebble.addEventListener('ready', function() {
     settingsMsg[KEY_SETTING_LIGHT_TEXT] = light  ? 1 : 0;
     // Send settings first, then fetch car data in the ACK callback so
     // the two sendAppMessage calls don't collide.
+    var debugMock = localStorage.getItem('debug_mock') === 'true';
     Pebble.sendAppMessage(settingsMsg, function() {
-      if (!s_username || !s_password) { sendMockData(); return; }
+      if (debugMock || !s_username || !s_password) { sendMockData(); return; }
       fetchAndSend();
     }, function() {
-      if (!s_username || !s_password) { sendMockData(); return; }
+      if (debugMock || !s_username || !s_password) { sendMockData(); return; }
       fetchAndSend();
     });
   }, 500);
@@ -381,8 +383,9 @@ Pebble.addEventListener('appmessage', function(e) {
 function buildClayConfig() {
   var creds = {};
   try { creds = JSON.parse(localStorage.getItem('polestar_creds') || '{}'); } catch(e2) {}
-  var metric = localStorage.getItem('use_metric') !== 'false';
-  var light  = localStorage.getItem('light_text') === 'true';
+  var metric     = localStorage.getItem('use_metric') !== 'false';
+  var light      = localStorage.getItem('light_text') === 'true';
+  var debug_mock = localStorage.getItem('debug_mock') === 'true';
   return [
     { 'type': 'heading', 'defaultValue': 'Polestar' },
     { 'type': 'section', 'items': [
@@ -403,6 +406,11 @@ function buildClayConfig() {
       { 'type': 'heading', 'defaultValue': 'Display' },
       { 'type': 'toggle', 'messageKey': 'SETTING_LIGHT_TEXT',
         'label': 'Black text', 'defaultValue': light }
+    ]},
+    { 'type': 'section', 'items': [
+      { 'type': 'heading', 'defaultValue': 'Debug' },
+      { 'type': 'toggle', 'id': 'debug_mock', 'messageKey': null,
+        'label': 'Use placeholder data', 'defaultValue': debug_mock }
     ]},
     { 'type': 'submit', 'defaultValue': 'Save & Refresh' }
   ];
@@ -432,10 +440,12 @@ Pebble.addEventListener('webviewclosed', function(e) {
       getStoredCreds();
     }
 
-    var metric = settings.SETTING_UNITS      ? !!settings.SETTING_UNITS.value      : true;
-    var light  = settings.SETTING_LIGHT_TEXT ? !!settings.SETTING_LIGHT_TEXT.value : false;
-    localStorage.setItem('use_metric', metric ? 'true' : 'false');
-    localStorage.setItem('light_text', light  ? 'true' : 'false');
+    var metric     = settings.SETTING_UNITS      ? !!settings.SETTING_UNITS.value      : true;
+    var light      = settings.SETTING_LIGHT_TEXT ? !!settings.SETTING_LIGHT_TEXT.value : false;
+    var debug_mock = settings.debug_mock         ? !!settings.debug_mock.value         : false;
+    localStorage.setItem('use_metric',  metric     ? 'true' : 'false');
+    localStorage.setItem('light_text',  light      ? 'true' : 'false');
+    localStorage.setItem('debug_mock',  debug_mock ? 'true' : 'false');
 
     var msg = {};
     msg[KEY_SETTING_UNITS]      = metric ? 1 : 0;
