@@ -136,7 +136,7 @@ static void icon_stroke(GContext *ctx) {
 // Path points are centered around the body pivot so gpath_rotate_to works correctly.
 static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle, int wheel_r_override) {
   int x = r.origin.x, y = r.origin.y, w = r.size.w, h = r.size.h;
-  int wheel_r = wheel_r_override > 0 ? wheel_r_override : MAX(h / 5, 8);
+  int wheel_r = wheel_r_override > 0 ? wheel_r_override : MAX(h / 5, 5);
   int body_h  = h - wheel_r;
   // Pivot = center of car body rectangle
   int pcx = w / 2;
@@ -213,17 +213,14 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #else
   int ground_y = car_y + car_h;
 #endif
-  // Quadratic bezier: port → hangs vertically down → runs off left edge.
-  // morph_p > 0: cable tightens upward (lifts off ground) and sweeps off-screen left.
-  // Start stays attached to the car; midpoint and end rise to port level while
-  // end sweeps left — cable visibly retracts over the full transition duration.
+  // Quadratic bezier: port → sag to ground → runs off left edge.
+  // As morph_p increases the plug end falls from port to ground, cable lies flat.
   int sx = port_x;
-  int sy = port_y;
+  int sy = (int)CABLE_LERP(port_y, ground_y, morph_p);
   int mx = port_x;
-  int my = (int)CABLE_LERP(ground_y, port_y, morph_p);
+  int my = ground_y;
   int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
-  // Cable end falls below screen as it sweeps away
-  int ey = ground_y + (int)CABLE_LERP(0, bounds_h / 4, morph_p);
+  int ey = ground_y;
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
   for (int pass = 0; pass < 2; pass++) {
@@ -524,7 +521,11 @@ static CarState car_target_for_page(int page, GRect bounds) {
       break;
     }
     case PAGE_CHARGE_PCT: {
+#if defined(PBL_PLATFORM_BASALT) || defined(PBL_PLATFORM_DIORITE)
+      int cw = w * 72 / 100;
+#else
       int cw = w * 60 / 100;
+#endif
       int ch = cw * 72 / 161;
       t.w = cw;
       t.x = w / 2 - cw / 2;
@@ -536,7 +537,11 @@ static CarState car_target_for_page(int page, GRect bounds) {
       break;
     }
     case PAGE_RANGE: {
+#if defined(PBL_PLATFORM_BASALT) || defined(PBL_PLATFORM_DIORITE)
+      int cw = w * 46 / 100;
+#else
       int cw = w * 42 / 100;
+#endif
       int ch = cw * 72 / 161;
       t.w = cw;
       t.x = w / 2 - cw / 2;
@@ -656,6 +661,9 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_context_set_fill_color(ctx, COLOR_FG);
     graphics_fill_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
     graphics_draw_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
+    // Mask: prevent circle from peeking above the car
+    graphics_context_set_fill_color(ctx, COLOR_BG);
+    graphics_fill_rect(ctx, GRect(0, 0, w, (int)s_car_cur.y), 0, GCornerNone);
   }
 #ifdef PBL_ROUND
   else {
@@ -684,7 +692,7 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
 // ── Page renderers ────────────────────────────────────────────────────────────
 
 static void draw_page_climate(GContext *ctx, GRect bounds) {
-  int y = CONTENT_Y + 8;
+  int y = CONTENT_Y + 4;
   int w = bounds.size.w - INSET_X * 2;
 
   graphics_context_set_text_color(ctx, COLOR_TEXT);
@@ -697,7 +705,7 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
             GRect(INSET_X, y + 44, w, 36),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = bounds.size.h - 60;
+  int div_y = bounds.size.h - 52;
   graphics_context_set_stroke_color(ctx, COLOR_TEXT);
   graphics_context_set_stroke_width(ctx, 2);
 #ifdef PBL_ROUND
@@ -728,7 +736,7 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
   int w = bounds.size.w - INSET_X * 2;
   int lbl_h = 36;
   int gap = 6;
-  int icon_y = CONTENT_Y + (bounds.size.h - CONTENT_Y) / 12;
+  int icon_y = CONTENT_Y + (bounds.size.h - CONTENT_Y) / 12 + 6;
   int icon_h = bounds.size.h - icon_y - lbl_h - gap - 8;
 
   draw_icon_lock(ctx,
@@ -794,7 +802,7 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   int glyph_y  = CONTENT_Y + 13;
 #endif
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * digit_w - 10, glyph_y),
+    GPoint(INSET_X + digits * digit_w - 6, glyph_y),
     glyph_sz);
 }
 
@@ -817,10 +825,10 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
   snprintf(num, sizeof(num), "%07d", val);
 #ifdef PBL_ROUND
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 0, 4);
+    s_state.use_metric ? "kilometers\ndriven" : "miles driven", false, 0, 4);
 #else
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometers\ndriven" : "miles\ndriven", false, 0, 4);
+    s_state.use_metric ? "kilometers\ndriven" : "miles driven", false, 0, 4);
 #endif
 
   // During the ground morph the car layer owns the globe visual; skip duplicate draw
@@ -830,7 +838,7 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
-  int y = CONTENT_Y + 8;
+  int y = CONTENT_Y + 4;
   int w = bounds.size.w - INSET_X * 2;
   graphics_context_set_text_color(ctx, COLOR_TEXT);
   draw_text(ctx, s_state.location,
@@ -839,10 +847,10 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 8);
   draw_text(ctx, "current location",
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 61, w, 32),
+            GRect(INSET_X, y + 53, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
-  int div_y = bounds.size.h - 60;
+  int div_y = bounds.size.h - 52;
   graphics_context_set_stroke_color(ctx, COLOR_TEXT);
   graphics_context_set_stroke_width(ctx, 2);
 #ifdef PBL_ROUND
@@ -1018,7 +1026,7 @@ static void open_action_menu(void) {
 // ── Globe spin ────────────────────────────────────────────────────────────────
 
 static void globe_spin_update(Animation *anim, const AnimationProgress progress) {
-  s_globe_rot = (int32_t)((int64_t)TRIG_MAX_ANGLE * progress / ANIMATION_NORMALIZED_MAX);
+  s_globe_rot = -(int32_t)((int64_t)TRIG_MAX_ANGLE * progress / ANIMATION_NORMALIZED_MAX);
   layer_mark_dirty(s_canvas);
 }
 static void globe_spin_stopped(Animation *anim, bool finished, void *context) {
