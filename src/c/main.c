@@ -391,7 +391,7 @@ static void draw_globe(GContext *ctx, GRect bounds) {
   // Globe radius and center: shifted right and down to match Figma layout
   int gr = w * 52 / 100;
   int gx = w * 75 / 100;
-  int gy = h + gr - 22;  // top of globe == ground line, morph stays below car
+  int gy = h + gr / 4;  // center below screen so upper arc is visible
 
   // Globe fill + outline
   graphics_context_set_fill_color(ctx, COLOR_FG);
@@ -454,29 +454,12 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int y = CONTENT_Y + y_extra;
   int x = INSET_X + x_extra;
   int w = bounds.size.w - INSET_X * 2 - x_extra;
-#if defined(PBL_PLATFORM_EMERY)
+#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   GFont num_font;
   int num_h, lbl_y;
   if (large) {
     num_font = fonts_get_system_font(FONT_KEY_LECO_60_NUMBERS_AM_PM);
     num_h = 68; lbl_y = y + 60;
-  } else if (strlen(number) > 5) {
-    // LECO_36 fits 7 digits in Emery's 172px (7×~22px=154px); Gabbro is too narrow
-    num_font = fonts_get_system_font(FONT_KEY_LECO_36_BOLD_NUMBERS);
-    num_h = 44; lbl_y = y + 38;
-  } else {
-    num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
-    num_h = 52; lbl_y = y + 44;
-  }
-#elif defined(PBL_PLATFORM_GABBRO)
-  GFont num_font;
-  int num_h, lbl_y;
-  if (large) {
-    num_font = fonts_get_system_font(FONT_KEY_LECO_60_NUMBERS_AM_PM);
-    num_h = 68; lbl_y = y + 60;
-  } else if (strlen(number) > 5) {
-    num_font = fonts_get_system_font(FONT_KEY_LECO_26_BOLD_NUMBERS_AM_PM);
-    num_h = 36; lbl_y = y + 28;
   } else {
     num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
     num_h = 52; lbl_y = y + 44;
@@ -564,7 +547,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
       int ch  = cw * 72 / 161;
       int gr  = w * 52 / 100;
       int gx  = w * 75 / 100;
-      int gy  = h + gr - 22;
+      int gy  = h + gr / 4;
       int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
       int sx  = gx - (int32_t)gr * sin_lookup(a25) / TRIG_MAX_RATIO;
       int sy  = gy - (int32_t)gr * cos_lookup(a25) / TRIG_MAX_RATIO;
@@ -1120,7 +1103,7 @@ static void navigate(int dir) {
   bool from_car = is_car_page(s_anim_from_page);
   bool to_car   = is_car_page(s_page);
   CarState target = car_target_for_page(s_page, bounds);
-  s_ground_morph   = (from_car && to_car && s_anim_from_page == PAGE_RANGE && s_page == PAGE_ODO);
+  s_ground_morph   = false;
   s_ground_morph_p = 0;
   bool odo_to_loc = (s_anim_from_page == PAGE_ODO && s_page == PAGE_LOCATION);
   bool loc_to_odo = (s_anim_from_page == PAGE_LOCATION && s_page == PAGE_ODO);
