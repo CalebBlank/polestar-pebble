@@ -123,7 +123,11 @@ static bool              s_globe_spinning   = false;
 static int32_t           s_globe_rot        = 0;
 static bool              s_lock_shaking     = false;
 static int32_t           s_lock_shake_p     = 0;
+static bool              s_lock_toggling    = false;
+static int32_t           s_lock_toggle_p    = 0;
+static bool              s_lock_toggle_from = false;
 static int32_t           s_transition_p     = 0;
+static int               s_anim_dir         = 1;
 // ── Icon drawing ──────────────────────────────────────────────────────────────
 
 static void icon_fill(GContext *ctx) {
@@ -207,8 +211,8 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #define CABLE_LERP(a,b,p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
-  // Charge port: rear = left side of car
-  int port_x  = car_x + 8 * car_w / 161;
+  // Charge port: rear = left side of car (+20px right per user request)
+  int port_x  = car_x + 8 * car_w / 161 + 20;
   int port_y  = car_y + 32 * body_h / 54;
   // Ground level: bottom of wheels (also top of road strip on round screens)
 #ifdef PBL_ROUND
@@ -225,10 +229,10 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
   int ey = ground_y;
   // Control points: c1 curves right from port (S first bend), c2 approaches ground from above
-  int c1x = (int)CABLE_LERP(sx + 14, sx, morph_p);  // S-bend flattens as plug falls
-  int c1y = sy;
-  int c2x = ex + (int)CABLE_LERP(36, 10, morph_p);
-  int c2y = ey - (int)CABLE_LERP(18, 4, morph_p);
+  int c1x = (int)CABLE_LERP(sx + 32, sx, morph_p);  // deeper S-bend; flattens as plug falls
+  int c1y = sy - (int)CABLE_LERP(18, 0, morph_p);   // initial upward arc for natural droop
+  int c2x = ex + (int)CABLE_LERP(60, 10, morph_p);
+  int c2y = ey - (int)CABLE_LERP(35, 4, morph_p);
 
   // Two-pass: black outline first, white fill on top
   for (int pass = 0; pass < 2; pass++) {
@@ -253,54 +257,48 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   }
 }
 
-static void draw_icon_lock(GContext *ctx, GRect r, bool locked, int x_offset) {
+// unlock_p: 0 = fully locked, ANIMATION_NORMALIZED_MAX = fully unlocked
+static void draw_icon_lock(GContext *ctx, GRect r, int32_t unlock_p, int x_offset) {
   int cx = r.origin.x + r.size.w / 2 + x_offset;
+  int N  = ANIMATION_NORMALIZED_MAX;
 
-  // Scale body to fit available height. From Figma: body=72×64, shackle adds
-  // arm_h(21)+arc_r(16)=37px above body → total ~101px for bw=72.
   int max_bw = r.size.h * 5 / 7;
 #if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw);
 #else
   int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw) * 4 / 5;
 #endif
-  int bh     = bw * 8 / 9;    // 72→64px (matches Figma body height exactly)
-  int arm_h  = bw * 16 / 100; // shorter shackle arms
-  int arc_r  = bw * 22 / 100; // 72→16px (center-of-stroke shackle radius)
-  int arm_sw = bw * 19 / 100; // 72→14px (shackle stroke width, Figma outer-inner)
+  int bh     = bw * 8 / 9;
+  int arm_h  = bw * 16 / 100;
+  int arc_r  = bw * 22 / 100;
+  int arm_sw = bw * 19 / 100;
   arm_sw = MAX(arm_sw, 4);
 
-  // When unlocked, lift the shackle so the right side clearly clears the body top
-  int lift = locked ? 0 : MAX(arc_r - arm_h + 8, 4);
+  int max_lift = MAX(arc_r - arm_h + 8, 4);
+  int lift     = (int)((int64_t)max_lift * unlock_p / N);
 
-  // Center the entire icon (arc top → body bottom) vertically in r, including lift
   int total_h = arc_r + arm_h + lift + bh;
   int by = r.origin.y + (r.size.h - total_h) / 2 + arc_r + arm_h + lift;
   int bx = cx - bw / 2;
 
-  // Shackle arc: raised by lift when unlocked
-  int arc_cx = cx;
-  int arc_cy = by - arm_h - lift;
-  int ol = 4;  // outline thickness in px
-
-  // Left arm always inserts into body; right arm has a gap when unlocked
+  int arc_cx  = cx;
+  int arc_cy  = by - arm_h - lift;
+  int ol      = 4;
   int left_bot  = by + ol;
-  int right_bot = locked ? (by + ol) : arc_cy;
+  int right_bot = (by + ol) + (int)((int64_t)(arc_cy - (by + ol)) * unlock_p / N);
+  int unlock_ol = (int)((int64_t)ol * unlock_p / N);
   GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
 
-  // Lock body drawn first; shackle is drawn on top so its white fill
-  // covers the body's top outline at the junction — no seam line.
   icon_fill(ctx);
   graphics_fill_rect(ctx, GRect(bx, by, bw, bh), 5, GCornersAll);
   icon_stroke(ctx);
   graphics_draw_round_rect(ctx, GRect(bx, by, bw, bh), 5);
 
-  // --- Shackle black outline pass ---
   graphics_context_set_fill_color(ctx, COLOR_DARK);
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, left_bot - arc_cy), 0, GCornerNone);
   graphics_fill_rect(ctx,
-    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy + (locked ? 0 : ol)), 0, GCornerNone);
+    GRect(arc_cx + arc_r - arm_sw/2 - ol, arc_cy, arm_sw + ol*2, right_bot - arc_cy + unlock_ol), 0, GCornerNone);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, arm_sw + ol * 2);
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
@@ -308,7 +306,6 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked, int x_offset) {
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
                     DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
 
-  // --- Shackle white fill pass ---
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_fill_rect(ctx,
     GRect(arc_cx - arc_r - arm_sw/2, arc_cy, arm_sw, left_bot - arc_cy), 0, GCornerNone);
@@ -321,12 +318,11 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked, int x_offset) {
   graphics_draw_arc(ctx, arc_rect, GOvalScaleModeFitCircle,
                     DEG_TO_TRIGANGLE(0), DEG_TO_TRIGANGLE(90));
 
-  // Keyhole: horizontal black line centered in body (matches Figma Frame 9 x=94-106, y=125)
   int kl = bw * 9 / 100;
   int ky = by + bh * 52 / 100;
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
   graphics_context_set_stroke_width(ctx, MAX(arm_sw * 2 / 5, 3));
-  if (locked) {
+  if (unlock_p < N / 2) {
     graphics_draw_line(ctx, GPoint(cx, ky - kl), GPoint(cx, ky + kl));
   } else {
     graphics_draw_line(ctx, GPoint(cx - kl, ky), GPoint(cx + kl, ky));
@@ -348,12 +344,11 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   int mh2 = h * 40 / 100;
   int px1 = w * 29 / 100;
   int px2 = w * 70 / 100;
-  int run1 = mh1 * 15 / 13;
-  int run2 = mh2 * 15 / 13;
+  // Cap slopes so they stay within canvas bounds — prevents outline clipping at edges
+  int run1 = MIN(mh1 * 15 / 13, px1 - 2);
+  int run2 = MIN(mh2 * 15 / 13, w - px2 - 2);
 
   graphics_context_set_fill_color(ctx, COLOR_FG);
-  graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 4);
 
   {
     GPoint pts[] = {
@@ -367,7 +362,6 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     GPathInfo info = { .num_points = 6, .points = pts };
     GPath *path = gpath_create(&info);
     gpath_draw_filled(ctx, path);
-    gpath_draw_outline(ctx, path);
     gpath_destroy(path);
   }
   {
@@ -382,10 +376,20 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     GPathInfo info = { .num_points = 6, .points = pts };
     GPath *path = gpath_create(&info);
     gpath_draw_filled(ctx, path);
-    gpath_draw_outline(ctx, path);
     gpath_destroy(path);
   }
 
+  // Draw only the slope outlines (capped within canvas, no edge artifacts)
+  graphics_context_set_stroke_color(ctx, COLOR_DARK);
+  graphics_context_set_stroke_width(ctx, 4);
+  graphics_draw_line(ctx, GPoint(px1-run1, h+4), GPoint(px1-4,  h-mh1+3));
+  graphics_draw_line(ctx, GPoint(px1-4, h-mh1+3), GPoint(px1,   h-mh1));
+  graphics_draw_line(ctx, GPoint(px1,   h-mh1),   GPoint(px1+4, h-mh1+3));
+  graphics_draw_line(ctx, GPoint(px1+4, h-mh1+3), GPoint(px1+run1, h+4));
+  graphics_draw_line(ctx, GPoint(px2-run2, h+4), GPoint(px2-4,  h-mh2+3));
+  graphics_draw_line(ctx, GPoint(px2-4, h-mh2+3), GPoint(px2,   h-mh2));
+  graphics_draw_line(ctx, GPoint(px2,   h-mh2),   GPoint(px2+4, h-mh2+3));
+  graphics_draw_line(ctx, GPoint(px2+4, h-mh2+3), GPoint(px2+run2, h+4));
 }
 
 static GPoint globe_pt(int gx, int gy, int gr, int sx, int sy, int32_t ca, int32_t sa) {
@@ -651,6 +655,13 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_fill_circle(ctx, GPoint(hint_x, bounds.size.h / 2), 16);
   }
 
+  // Globe lives on the car_layer (full-screen, non-sliding) to avoid canvas edge clipping
+  bool on_odo   = (s_page == PAGE_ODO);
+  bool from_odo = s_animating && (s_anim_from_page == PAGE_ODO);
+  if ((on_odo || from_odo) && !s_ground_morph) {
+    draw_globe(ctx, bounds);
+  }
+
   if (s_car_cur.w <= 0) return;
   if ((int)s_car_cur.y >= bounds.size.h) return;  // parked off-screen below
   int cw = (int)s_car_cur.w;
@@ -758,9 +769,13 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
     int32_t angle = (int32_t)((int64_t)TRIG_MAX_ANGLE * 3 * s_lock_shake_p / ANIMATION_NORMALIZED_MAX);
     lock_x = 6 * sin_lookup(angle) / TRIG_MAX_RATIO;
   }
-  draw_icon_lock(ctx,
-    GRect(INSET_X, icon_y, w, icon_h),
-    s_state.locked, lock_x);
+  int32_t unlock_p;
+  if (s_lock_toggling) {
+    unlock_p = s_lock_toggle_from ? s_lock_toggle_p : (ANIMATION_NORMALIZED_MAX - s_lock_toggle_p);
+  } else {
+    unlock_p = s_state.locked ? 0 : ANIMATION_NORMALIZED_MAX;
+  }
+  draw_icon_lock(ctx, GRect(INSET_X, icon_y, w, icon_h), unlock_p, lock_x);
 
   graphics_context_set_text_color(ctx, COLOR_TEXT);
   draw_text(ctx, s_state.locked ? "locked" : "unlocked",
@@ -850,19 +865,25 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
     s_state.use_metric ? "kilometers\ndriven" : "miles driven", false, 0, 4);
 #endif
 
-  // During the ground morph the car layer owns the globe visual; skip duplicate draw
-  if (!s_ground_morph) {
-    draw_globe(ctx, bounds);
-  }
 }
 
 static void draw_page_location(GContext *ctx, GRect bounds) {
   int y = CONTENT_Y + 4;
   int w = bounds.size.w - INSET_X * 2;
   graphics_context_set_text_color(ctx, COLOR_TEXT);
-  draw_text(ctx, s_state.location,
-            fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
-            GRect(INSET_X, y, w, 80),
+  GRect addr_box = GRect(INSET_X, y, w, 80);
+  GFont addr_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD);
+  GSize addr_sz = graphics_text_layout_get_content_size(
+    s_state.location, addr_font, addr_box, GTextOverflowModeWordWrap, GTextAlignmentLeft);
+  if (addr_sz.h > addr_box.size.h) {
+    addr_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+    addr_sz = graphics_text_layout_get_content_size(
+      s_state.location, addr_font, addr_box, GTextOverflowModeWordWrap, GTextAlignmentLeft);
+    if (addr_sz.h > addr_box.size.h) {
+      addr_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD);
+    }
+  }
+  draw_text(ctx, s_state.location, addr_font, addr_box,
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 8);
   draw_text(ctx, "current location",
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
@@ -994,12 +1015,37 @@ static void inbox_dropped(AppMessageResult reason, void *context) {
 
 // ── Action menu ───────────────────────────────────────────────────────────────
 
+static void lock_toggle_update(Animation *anim, const AnimationProgress progress) {
+  s_lock_toggle_p = progress;
+  layer_mark_dirty(s_canvas);
+}
+static void lock_toggle_stopped(Animation *anim, bool finished, void *context) {
+  s_lock_toggling = false;
+  s_lock_toggle_p = 0;
+  layer_mark_dirty(s_canvas);
+}
+static const AnimationImplementation s_lock_toggle_impl = { .update = lock_toggle_update };
+
 static void action_performed(ActionMenu *menu, const ActionMenuItem *item, void *context) {
   vibes_short_pulse();
   int act = (int)(intptr_t)action_menu_item_get_action_data(item);
   switch (act) {
     case 0: s_state.climate_on = !s_state.climate_on; send_cmd(CMD_TOGGLE_CLIMATE); break;
-    case 1: s_state.locked     = !s_state.locked;     send_cmd(CMD_TOGGLE_LOCK);    break;
+    case 1:
+      if (!s_lock_toggling) {
+        s_lock_toggle_from = s_state.locked;
+        s_lock_toggling    = true;
+        s_lock_toggle_p    = 0;
+        Animation *ltanim  = animation_create();
+        animation_set_implementation(ltanim, &s_lock_toggle_impl);
+        animation_set_duration(ltanim, 400);
+        animation_set_curve(ltanim, AnimationCurveEaseInOut);
+        animation_set_handlers(ltanim, (AnimationHandlers){ .stopped = lock_toggle_stopped }, NULL);
+        animation_schedule(ltanim);
+      }
+      s_state.locked = !s_state.locked;
+      send_cmd(CMD_TOGGLE_LOCK);
+      break;
     case 2: send_cmd(CMD_HONK); break;
     case 3: send_cmd(CMD_NAVIGATE); break;
   }
@@ -1047,12 +1093,12 @@ static void open_action_menu(void) {
 
 static void globe_spin_update(Animation *anim, const AnimationProgress progress) {
   s_globe_rot = -(int32_t)((int64_t)TRIG_MAX_ANGLE * progress / ANIMATION_NORMALIZED_MAX);
-  layer_mark_dirty(s_canvas);
+  layer_mark_dirty(s_car_layer);
 }
 static void globe_spin_stopped(Animation *anim, bool finished, void *context) {
   s_globe_spinning = false;
   s_globe_rot = 0;
-  layer_mark_dirty(s_canvas);
+  layer_mark_dirty(s_car_layer);
 }
 static const AnimationImplementation s_globe_spin_impl = { .update = globe_spin_update };
 
@@ -1069,9 +1115,15 @@ static const AnimationImplementation s_lock_shake_impl = { .update = lock_shake_
 
 static void globe_intro_update(Animation *anim, const AnimationProgress progress) {
   s_globe_rot = -(int32_t)((int64_t)(TRIG_MAX_ANGLE / 12) * progress / ANIMATION_NORMALIZED_MAX);
-  layer_mark_dirty(s_canvas);
+  layer_mark_dirty(s_car_layer);
 }
 static const AnimationImplementation s_globe_intro_impl = { .update = globe_intro_update };
+
+static void globe_intro_rev_update(Animation *anim, const AnimationProgress progress) {
+  s_globe_rot = (int32_t)((int64_t)(TRIG_MAX_ANGLE / 12) * progress / ANIMATION_NORMALIZED_MAX);
+  layer_mark_dirty(s_car_layer);
+}
+static const AnimationImplementation s_globe_intro_rev_impl = { .update = globe_intro_rev_update };
 
 static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
   if (s_animating) return;
@@ -1088,7 +1140,7 @@ static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
     Animation *anim = animation_create();
     animation_set_implementation(anim, &s_lock_shake_impl);
     animation_set_duration(anim, 500);
-    animation_set_curve(anim, AnimationCurveLinear);
+    animation_set_curve(anim, AnimationCurveEaseInOut);
     animation_set_handlers(anim, (AnimationHandlers){ .stopped = lock_shake_stopped }, NULL);
     animation_schedule(anim);
   }
@@ -1096,25 +1148,6 @@ static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
 
 // ── Page transition animation ─────────────────────────────────────────────────
 
-static AnimationProgress spring_curve(AnimationProgress d) {
-  int32_t N = ANIMATION_NORMALIZED_MAX;
-  if (d <= 0) return 0;
-  if (d >= N) return N;
-  int32_t T1   = N * 3 / 4;
-  int32_t PEAK = N + N / 20;
-  if (d <= T1) {
-    int64_t u  = (int64_t)d * N / T1;
-    int64_t u2 = u * u / N;
-    int64_t u3 = u2 * u / N;
-    return (AnimationProgress)((3 * u2 - 2 * u3) * PEAK / N);
-  } else {
-    int64_t dt  = d - T1;
-    int64_t rem = N - T1;
-    int64_t v   = dt * N / rem;
-    int64_t q   = v * v / N;
-    return (AnimationProgress)(PEAK - (int64_t)(PEAK - N) * q / N);
-  }
-}
 
 static void update_page_indicator(void) {
   snprintf(s_page_buf, sizeof(s_page_buf), "%d/%d", s_page + 1, PAGE_COUNT);
@@ -1144,6 +1177,7 @@ static void navigate(int dir) {
   int    w = bounds.size.w, h = bounds.size.h;
 
   s_animating      = true;
+  s_anim_dir       = dir;
   s_anim_from_page = s_page;
   s_page           = (s_page + dir + PAGE_COUNT) % PAGE_COUNT;
   update_page_indicator();
@@ -1153,13 +1187,15 @@ static void navigate(int dir) {
   layer_set_update_proc(s_anim_layer, canvas_update_proc);
   layer_insert_below_sibling(s_anim_layer, s_canvas);
 
-  GRect canvas_start = GRect(dir * w, 0, w, h);
+  // Add gap between pages so illustrations don't clip at the seam during transition
+  int gap = 16;
+  GRect canvas_start = GRect(dir * (w + gap), 0, w, h);
   GRect canvas_end   = GRect(0, 0, w, h);
   layer_set_frame(s_canvas, canvas_start);
   layer_mark_dirty(s_canvas);
 
   GRect anim_start = GRect(0, 0, w, h);
-  GRect anim_end   = GRect(-dir * w, 0, w, h);
+  GRect anim_end   = GRect(-dir * (w + gap), 0, w, h);
 
   PropertyAnimation *pa_in  = property_animation_create_layer_frame(s_canvas, &canvas_start, &canvas_end);
   PropertyAnimation *pa_out = property_animation_create_layer_frame(s_anim_layer, &anim_start, &anim_end);
@@ -1200,11 +1236,12 @@ static void navigate(int dir) {
   animation_set_duration(car_anim, 380);
   animation_set_curve(car_anim, AnimationCurveEaseInOut);
 
-  // Globe intro: subtle spin when arriving at the odo page from the range page
-  if (s_anim_from_page == PAGE_RANGE && s_page == PAGE_ODO) {
+  // Globe intro spin when arriving at odo: forward from range, reverse from location
+  if (s_page == PAGE_ODO && (s_anim_from_page == PAGE_RANGE || s_anim_from_page == PAGE_LOCATION)) {
     s_globe_rot = 0;
     Animation *intro = animation_create();
-    animation_set_implementation(intro, &s_globe_intro_impl);
+    animation_set_implementation(intro,
+      s_anim_from_page == PAGE_LOCATION ? &s_globe_intro_rev_impl : &s_globe_intro_impl);
     animation_set_duration(intro, 380);
     animation_set_curve(intro, AnimationCurveEaseInOut);
     animation_set_handlers(intro, (AnimationHandlers){ .stopped = globe_spin_stopped }, NULL);
