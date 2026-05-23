@@ -215,9 +215,10 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #endif
   // Quadratic bezier: port → sag to ground → runs off left edge.
   // As morph_p increases the plug end falls from port to ground, cable lies flat.
-  int sx = port_x;
+  int slide = (int)CABLE_LERP(0, 20, morph_p);
+  int sx = port_x - slide;
   int sy = (int)CABLE_LERP(port_y, ground_y, morph_p);
-  int mx = port_x;
+  int mx = port_x - slide;
   int my = ground_y;
   int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
   int ey = ground_y;
@@ -560,7 +561,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
 #else
       int cw = w * 36 / 100;
 #endif
-      int ch  = cw * 72 / 161;
+      int ch  = cw * 90 / 161;
       int gr  = w * 52 / 100;
       int gx  = w * 75 / 100;
       int gy  = h + gr / 4;
@@ -638,7 +639,7 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   if (s_car_cur.w <= 0) return;
   if ((int)s_car_cur.y >= bounds.size.h) return;  // parked off-screen below
   int cw = (int)s_car_cur.w;
-  int ch = cw * 72 / 161;
+  int ch = (s_page == PAGE_ODO) ? cw * 90 / 161 : cw * 72 / 161;
 
   if (s_ground_morph) {
     int w = bounds.size.w, h = bounds.size.h;
