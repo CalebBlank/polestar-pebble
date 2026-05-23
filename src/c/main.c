@@ -848,7 +848,7 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GTextOverflowModeWordWrap, GTextAlignmentLeft, 8);
   draw_text(ctx, "current location",
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
-            GRect(INSET_X, y + 61, w, 32),
+            GRect(INSET_X, y + 60, w, 32),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
   int div_y = bounds.size.h - 52;
