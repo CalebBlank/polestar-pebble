@@ -244,7 +244,7 @@ function sendError() {
 function handleCmd(cmd) {
   if (cmd === CMD_NAVIGATE) {
     if (s_car_lat !== 0 || s_car_lng !== 0) {
-      Pebble.openURL('https://maps.google.com/?q=' + s_car_lat + ',' + s_car_lng);
+      Pebble.openURL('geo:' + s_car_lat + ',' + s_car_lng + '?q=' + s_car_lat + ',' + s_car_lng);
     }
     return;
   }
