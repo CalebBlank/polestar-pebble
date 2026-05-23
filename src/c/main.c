@@ -44,11 +44,13 @@
 #define PAGE_COUNT       7
 
 // ── Colors ────────────────────────────────────────────────────────────────────
-static GColor s_color_fg;
+static GColor s_color_fg;    // icon/illustration fill (always white on color devices)
+static GColor s_color_text;  // text and UI lines (black when light-text mode is on)
 static GColor s_color_bg;
 static GColor s_color_dark;
 static GColor s_color_dim;
 #define COLOR_FG   s_color_fg
+#define COLOR_TEXT s_color_text
 #define COLOR_BG   s_color_bg
 #define COLOR_DARK s_color_dark
 #define COLOR_DIM  s_color_dim
@@ -218,7 +220,7 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   int mx = port_x;
   int my = (int)CABLE_LERP(ground_y, port_y, morph_p);
   int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
-  int ey = (int)CABLE_LERP(ground_y, port_y, morph_p);
+  int ey = ground_y;
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
   for (int pass = 0; pass < 2; pass++) {
@@ -253,19 +255,22 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   int arm_sw = bw * 19 / 100; // 72→14px (shackle stroke width, Figma outer-inner)
   arm_sw = MAX(arm_sw, 4);
 
-  // Center the entire icon (arc top → body bottom) vertically in r
-  int total_h = arc_r + arm_h + bh;
-  int by = r.origin.y + (r.size.h - total_h) / 2 + arc_r + arm_h;
+  // When unlocked, lift the shackle so the right side clearly clears the body top
+  int lift = locked ? 0 : MAX(arc_r - arm_h + 8, 4);
+
+  // Center the entire icon (arc top → body bottom) vertically in r, including lift
+  int total_h = arc_r + arm_h + lift + bh;
+  int by = r.origin.y + (r.size.h - total_h) / 2 + arc_r + arm_h + lift;
   int bx = cx - bw / 2;
 
-  // Shackle arc centered on body. Unlocked: right arm stops short, left stays in body.
+  // Shackle arc: raised by lift when unlocked
   int arc_cx = cx;
-  int arc_cy = by - arm_h;
+  int arc_cy = by - arm_h - lift;
   int ol = 4;  // outline thickness in px
 
   // Left arm always inserts into body; right arm has a gap when unlocked
   int left_bot  = by + ol;
-  int right_bot = locked ? (by + ol) : (by - arm_h);
+  int right_bot = locked ? (by + ol) : arc_cy;
   GRect arc_rect = GRect(arc_cx - arc_r, arc_cy - arc_r, arc_r * 2, arc_r * 2);
 
   // Lock body drawn first; shackle is drawn on top so its white fill
@@ -374,7 +379,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     int dx  = 2 * amp * run1 / mh1;
     int n   = 3;
     int xl  = px1 - n * dx;
-    int zy  = (h - mh1) + mh1 * 45 / 100;
+    int zy  = (h - mh1) + mh1 * 75 / 100;
     GPoint prev = {0, 0};
     int x = xl, y = zy + amp;
     for (int i = 0; i <= 2 * n; i++) {
@@ -390,7 +395,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     int dx  = 2 * amp * run2 / mh2;
     int n   = 3;
     int xl  = px2 - n * dx;
-    int zy  = (h - mh2) + mh2 * 45 / 100;
+    int zy  = (h - mh2) + mh2 * 75 / 100;
     GPoint prev = {0, 0};
     int x = xl, y = zy + amp;
     for (int i = 0; i <= 2 * n; i++) {
@@ -483,7 +488,21 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int y = CONTENT_Y + y_extra;
   int x = INSET_X + x_extra;
   int w = bounds.size.w - INSET_X * 2 - x_extra;
-#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
+#if defined(PBL_PLATFORM_EMERY)
+  GFont num_font;
+  int num_h, lbl_y;
+  if (large) {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_60_NUMBERS_AM_PM);
+    num_h = 68; lbl_y = y + 60;
+  } else if (strlen(number) > 5) {
+    // LECO_36 fits 7 digits in Emery's 172px (7×~22px=154px); Gabbro is too narrow
+    num_font = fonts_get_system_font(FONT_KEY_LECO_36_BOLD_NUMBERS);
+    num_h = 44; lbl_y = y + 38;
+  } else {
+    num_font = fonts_get_system_font(FONT_KEY_LECO_42_NUMBERS);
+    num_h = 52; lbl_y = y + 44;
+  }
+#elif defined(PBL_PLATFORM_GABBRO)
   GFont num_font;
   int num_h, lbl_y;
   if (large) {
@@ -501,7 +520,7 @@ static void draw_big_stat(GContext *ctx, GRect bounds,
   int num_h  = large ? 52 : 36;
   int lbl_y  = y + (large ? 44 : 28);
 #endif
-  graphics_context_set_text_color(ctx, COLOR_FG);
+  graphics_context_set_text_color(ctx, COLOR_TEXT);
   draw_text(ctx, number, num_font,
             GRect(x, y, w, num_h),
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
@@ -603,21 +622,25 @@ static void car_anim_update(Animation *anim, const AnimationProgress progress) {
   s_car_cur.w   = LERP_P(s_car_phase[0].w, s_car_phase[1].w, progress);
   s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[1].rot, progress);
   if (s_ground_morph) {
-    s_ground_morph_p = progress;
-    // Keep car grounded (flat bottom) for first 75% of morph, then blend
-    // smoothly to the ODO globe position in the final quarter.
+    // Delay ground morph 100ms into the 280ms animation before it starts morphing
+    int32_t gm_delay = ANIMATION_NORMALIZED_MAX * 100 / 280;
+    s_ground_morph_p = progress <= gm_delay ? 0
+      : (int32_t)((int64_t)(progress - gm_delay) * ANIMATION_NORMALIZED_MAX
+                  / (ANIMATION_NORMALIZED_MAX - gm_delay));
+    // Keep car grounded (flat bottom) until ground morph is 75% done, then blend
+    // smoothly to the ODO globe position in the final quarter of the morph.
     GRect bnd = layer_get_bounds(window_get_root_layer(s_window));
     int ch = (int)s_car_cur.w * 72 / 161;
     int32_t N = ANIMATION_NORMALIZED_MAX;
     int flat_y = bnd.size.h - ch - 2;
-    if (progress <= N * 3 / 4) {
+    if (s_ground_morph_p <= N * 3 / 4) {
       if ((int)s_car_cur.y < flat_y) s_car_cur.y = (int16_t)flat_y;
       s_car_cur.rot = 0;
     } else {
       int32_t cw_3q = LERP_P(s_car_phase[0].w, s_car_phase[1].w, N * 3 / 4);
       int ch_3q  = (int)cw_3q * 72 / 161;
       int y_at_3q = bnd.size.h - ch_3q - 2;
-      int32_t sub_p = MIN((int32_t)(progress - N * 3 / 4) * 4, N);
+      int32_t sub_p = MIN((int32_t)(s_ground_morph_p - N * 3 / 4) * 4, N);
       s_car_cur.y   = (int16_t)LERP_P(y_at_3q, s_car_phase[1].y, sub_p);
       s_car_cur.rot = (int32_t)LERP_P(0, s_car_phase[1].rot, sub_p);
     }
@@ -696,7 +719,7 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
   int y = CONTENT_Y + 8;
   int w = bounds.size.w - INSET_X * 2;
 
-  graphics_context_set_text_color(ctx, COLOR_FG);
+  graphics_context_set_text_color(ctx, COLOR_TEXT);
   draw_text(ctx, s_state.climate_on ? "ON" : "OFF",
             fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
             GRect(INSET_X, y, w, 52),
@@ -707,7 +730,7 @@ static void draw_page_climate(GContext *ctx, GRect bounds) {
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
   int div_y = bounds.size.h - 60;
-  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_color(ctx, COLOR_TEXT);
   graphics_context_set_stroke_width(ctx, 2);
 #ifdef PBL_ROUND
   graphics_draw_line(ctx, GPoint(INSET_X + 8, div_y), GPoint(bounds.size.w - INSET_X - 8, div_y));
@@ -744,7 +767,7 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
     GRect(INSET_X, icon_y, w, icon_h),
     s_state.locked);
 
-  graphics_context_set_text_color(ctx, COLOR_FG);
+  graphics_context_set_text_color(ctx, COLOR_TEXT);
   draw_text(ctx, s_state.locked ? "locked" : "unlocked",
             fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
             GRect(INSET_X, icon_y + icon_h + gap, w, lbl_h),
@@ -755,7 +778,7 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
   if (!s_state.is_charging) {
     int y = CONTENT_Y;
     int w = bounds.size.w - INSET_X * 2;
-    graphics_context_set_text_color(ctx, COLOR_FG);
+    graphics_context_set_text_color(ctx, COLOR_TEXT);
     draw_text(ctx, "NOT",
               fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD),
               GRect(INSET_X, y, w, 52),
@@ -778,10 +801,10 @@ static void draw_page_charge_time(GContext *ctx, GRect bounds) {
 static void draw_percent_glyph(GContext *ctx, GPoint origin, int size) {
   int sq = MAX(size * 3 / 10, 4);  // square size (~8px at size=28)
   int sw = MAX(size / 6,      3);  // diagonal stroke width (~5px at size=28)
-  graphics_context_set_fill_color(ctx, COLOR_FG);
+  graphics_context_set_fill_color(ctx, COLOR_TEXT);
   graphics_fill_rect(ctx, GRect(origin.x,                  origin.y,                  sq, sq), 0, GCornerNone);
   graphics_fill_rect(ctx, GRect(origin.x + size - sq,      origin.y + size - sq,      sq, sq), 0, GCornerNone);
-  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_color(ctx, COLOR_TEXT);
   graphics_context_set_stroke_width(ctx, sw);
   graphics_draw_line(ctx,
     GPoint(origin.x + size - 1, origin.y + 1),
@@ -803,7 +826,7 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   int glyph_y  = CONTENT_Y + 13;
 #endif
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * digit_w + 1, glyph_y),
+    GPoint(INSET_X + digits * digit_w - 4, glyph_y),
     glyph_sz);
 }
 
@@ -841,7 +864,7 @@ static void draw_page_odo(GContext *ctx, GRect bounds) {
 static void draw_page_location(GContext *ctx, GRect bounds) {
   int y = CONTENT_Y + 8;
   int w = bounds.size.w - INSET_X * 2;
-  graphics_context_set_text_color(ctx, COLOR_FG);
+  graphics_context_set_text_color(ctx, COLOR_TEXT);
   draw_text(ctx, s_state.location,
             fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
             GRect(INSET_X, y, w, 80),
@@ -852,7 +875,7 @@ static void draw_page_location(GContext *ctx, GRect bounds) {
             GTextOverflowModeTrailingEllipsis, GTextAlignmentLeft, 0);
 
   int div_y = bounds.size.h - 60;
-  graphics_context_set_stroke_color(ctx, COLOR_FG);
+  graphics_context_set_stroke_color(ctx, COLOR_TEXT);
   graphics_context_set_stroke_width(ctx, 2);
 #ifdef PBL_ROUND
   graphics_draw_line(ctx, GPoint(INSET_X + 8, div_y), GPoint(bounds.size.w - INSET_X - 8, div_y));
@@ -903,7 +926,7 @@ static void canvas_update_proc(Layer *layer, GContext *ctx) {
   graphics_fill_rect(ctx, bounds, 0, GCornerNone);
 
   if (s_state.error && layer != s_anim_layer) {
-    graphics_context_set_text_color(ctx, COLOR_FG);
+    graphics_context_set_text_color(ctx, COLOR_TEXT);
     draw_text(ctx, "Error\nCheck phone",
               fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD),
               GRect(INSET_X, bounds.size.h / 2 - 28, bounds.size.w - INSET_X * 2, 56),
@@ -961,9 +984,9 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
 #ifdef PBL_COLOR
     bool lt = (bool)t->value->int32;
     persist_write_bool(PERSIST_KEY_LIGHT_TEXT, lt);
-    s_color_fg = lt ? GColorBlack : GColorWhite;
-    if (s_status_bar) status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_FG);
-    if (s_page_label) text_layer_set_text_color(s_page_label, COLOR_FG);
+    s_color_text = lt ? GColorBlack : GColorWhite;
+    if (s_status_bar) status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_TEXT);
+    if (s_page_label) text_layer_set_text_color(s_page_label, COLOR_TEXT);
 #endif
   }
 
@@ -1197,12 +1220,14 @@ static void window_load(Window *window) {
   s_color_bg   = GColorChromeYellow;
   s_color_dark = GColorBlack;
   s_color_dim  = GColorLightGray;
-  s_color_fg   = persist_read_bool(PERSIST_KEY_LIGHT_TEXT) ? GColorBlack : GColorWhite;
+  s_color_fg   = GColorWhite;
+  s_color_text = persist_read_bool(PERSIST_KEY_LIGHT_TEXT) ? GColorBlack : GColorWhite;
   s_state.use_metric = persist_exists(PERSIST_KEY_USE_METRIC)
     ? persist_read_bool(PERSIST_KEY_USE_METRIC) : true;
 #else
   s_color_bg   = GColorBlack;
   s_color_fg   = GColorWhite;
+  s_color_text = GColorWhite;
   s_color_dark = GColorBlack;
   s_color_dim  = GColorWhite;
 #endif
@@ -1220,7 +1245,7 @@ static void window_load(Window *window) {
 
   // Native status bar — auto-updates time, orange bg, white fg, no separator
   s_status_bar = status_bar_layer_create();
-  status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_FG);
+  status_bar_layer_set_colors(s_status_bar, COLOR_BG, COLOR_TEXT);
   status_bar_layer_set_separator_mode(s_status_bar, StatusBarLayerSeparatorModeNone);
   layer_add_child(root, status_bar_layer_get_layer(s_status_bar));
 
@@ -1229,7 +1254,7 @@ static void window_load(Window *window) {
   s_page_label = text_layer_create(
     GRect(bounds.size.w - lbl_w - 2, 0, lbl_w, STATUS_BAR_LAYER_HEIGHT));
   text_layer_set_background_color(s_page_label, GColorClear);
-  text_layer_set_text_color(s_page_label, COLOR_FG);
+  text_layer_set_text_color(s_page_label, COLOR_TEXT);
   text_layer_set_font(s_page_label, fonts_get_system_font(FONT_KEY_GOTHIC_14));
   text_layer_set_text_alignment(s_page_label, GTextAlignmentRight);
   layer_add_child(root, text_layer_get_layer(s_page_label));
