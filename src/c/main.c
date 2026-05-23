@@ -800,7 +800,7 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   int glyph_y  = CONTENT_Y + 13;
 #endif
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * digit_w - 6, glyph_y),
+    GPoint(INSET_X + digits * digit_w - 2, glyph_y),
     glyph_sz);
 }
 
