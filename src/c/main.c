@@ -202,8 +202,8 @@ static void draw_icon_car(GContext *ctx, GRect r, int32_t rot_angle, int wheel_r
   graphics_draw_circle(ctx, GPoint(rear_wx,  rear_wy),  wheel_r);
 }
 
-// Cable hangs from the charge port (rear/left of car) down to ground,
-// then runs off the left edge toward the charger (off-screen).
+// Cable hangs from the charge port (rear/left of car): exits leftward, droops
+// down-left, then exits off the left edge at ground level.
 static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
                                 int car_w, int car_h, int bounds_w, int bounds_h,
                                 int32_t morph_p) {
@@ -211,28 +211,26 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #define CABLE_LERP(a,b,p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
   int wheel_r = MAX(car_h / 4, 10);
   int body_h  = car_h - wheel_r;
-  // Charge port: rear = left side of car (+20px right per user request)
+  // Charge port: rear-left side of car body
   int port_x  = car_x + 8 * car_w / 161 + 20;
   int port_y  = car_y + 32 * body_h / 54;
-  // Ground level: bottom of wheels (also top of road strip on round screens)
 #ifdef PBL_ROUND
   int ground_y = bounds_h - 22;
 #else
   int ground_y = car_y + car_h;
 #endif
-  // Cubic bezier S-bend: cable exits port going slightly backward (right),
-  // sags down, then sweeps left to exit off-screen.
-  // As morph_p increases the plug falls from port to ground and the cable lies flat.
-  int slide = (int)CABLE_LERP(0, 20, morph_p);
-  int sx = port_x - slide;
+  // Start: port position (plug falls to ground as morph_p increases)
+  int sx = port_x;
   int sy = (int)CABLE_LERP(port_y, ground_y, morph_p);
-  int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
+  // End: off-screen left at ground level
+  int ex = (int)CABLE_LERP(-8, -(car_x + car_w + 20), morph_p);
   int ey = ground_y;
-  // Control points: c1 curves right from port (S first bend), c2 approaches ground from above
-  int c1x = (int)CABLE_LERP(sx + 32, sx, morph_p);  // deeper S-bend; flattens as plug falls
-  int c1y = sy - (int)CABLE_LERP(18, 0, morph_p);   // initial upward arc for natural droop
-  int c2x = ex + (int)CABLE_LERP(60, 10, morph_p);
-  int c2y = ey - (int)CABLE_LERP(35, 4, morph_p);
+  // c1: pull left from start so cable initially exits leftward
+  int c1x = sx - (int)CABLE_LERP(40, 10, morph_p);
+  int c1y = sy;
+  // c2: approach end from above so cable curves down before going flat
+  int c2x = ex + (int)CABLE_LERP(30, 8, morph_p);
+  int c2y = ey - (int)CABLE_LERP(28, 4, morph_p);
 
   // Two-pass: black outline first, white fill on top
   for (int pass = 0; pass < 2; pass++) {
@@ -1187,15 +1185,13 @@ static void navigate(int dir) {
   layer_set_update_proc(s_anim_layer, canvas_update_proc);
   layer_insert_below_sibling(s_anim_layer, s_canvas);
 
-  // Add gap between pages so illustrations don't clip at the seam during transition
-  int gap = 16;
-  GRect canvas_start = GRect(dir * (w + gap), 0, w, h);
+  GRect canvas_start = GRect(dir * w, 0, w, h);
   GRect canvas_end   = GRect(0, 0, w, h);
   layer_set_frame(s_canvas, canvas_start);
   layer_mark_dirty(s_canvas);
 
   GRect anim_start = GRect(0, 0, w, h);
-  GRect anim_end   = GRect(-dir * (w + gap), 0, w, h);
+  GRect anim_end   = GRect(-dir * w, 0, w, h);
 
   PropertyAnimation *pa_in  = property_animation_create_layer_frame(s_canvas, &canvas_start, &canvas_end);
   PropertyAnimation *pa_out = property_animation_create_layer_frame(s_anim_layer, &anim_start, &anim_end);
