@@ -392,9 +392,11 @@ function buildClayConfig() {
       { 'type': 'heading', 'defaultValue': 'Account' },
       { 'type': 'input', 'id': 'email', 'messageKey': null,
         'label': 'Polestar email', 'defaultValue': creds.username || '',
+        'description': creds.username ? 'Saved: ' + creds.username : 'Not saved',
         'attributes': { 'type': 'email', 'placeholder': 'you@example.com' } },
       { 'type': 'input', 'id': 'password', 'messageKey': null,
         'label': 'Password', 'defaultValue': creds.password || '',
+        'description': creds.password ? 'Password saved' : 'Not saved',
         'attributes': { 'type': 'password' } }
     ]},
     { 'type': 'section', 'items': [
@@ -440,9 +442,10 @@ Pebble.addEventListener('webviewclosed', function(e) {
       getStoredCreds();
     }
 
-    var metric     = settings.SETTING_UNITS      ? !!settings.SETTING_UNITS.value      : true;
-    var light      = settings.SETTING_LIGHT_TEXT ? !!settings.SETTING_LIGHT_TEXT.value : false;
-    var debug_mock = settings.debug_mock         ? !!settings.debug_mock.value         : false;
+    var metric          = settings.SETTING_UNITS      ? !!settings.SETTING_UNITS.value      : true;
+    var light           = settings.SETTING_LIGHT_TEXT ? !!settings.SETTING_LIGHT_TEXT.value : false;
+    var debug_mock      = settings.debug_mock         ? !!settings.debug_mock.value         : false;
+    var prevDebugMock   = localStorage.getItem('debug_mock') === 'true';
     localStorage.setItem('use_metric',  metric     ? 'true' : 'false');
     localStorage.setItem('light_text',  light      ? 'true' : 'false');
     localStorage.setItem('debug_mock',  debug_mock ? 'true' : 'false');
@@ -453,10 +456,12 @@ Pebble.addEventListener('webviewclosed', function(e) {
     // Only refresh car data if credentials were just entered; a settings-only
     // change (units, light text) must not overwrite the current lock/climate state.
     var credentialsChanged = !!(email || password);
+    var debugChanged       = debug_mock !== prevDebugMock;
+    var shouldRefresh      = credentialsChanged || debugChanged;
     Pebble.sendAppMessage(msg, function() {
-      if (credentialsChanged) handleCmd(CMD_REFRESH);
+      if (shouldRefresh) handleCmd(CMD_REFRESH);
     }, function() {
-      if (credentialsChanged) handleCmd(CMD_REFRESH);
+      if (shouldRefresh) handleCmd(CMD_REFRESH);
     });
   } catch(e4) {
     console.log('webviewclosed error: ' + e4);

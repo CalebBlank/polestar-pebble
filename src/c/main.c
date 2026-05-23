@@ -121,6 +121,9 @@ static int32_t           s_ground_morph_p   = 0;
 static int32_t           s_cable_anim_p     = 0;
 static bool              s_globe_spinning   = false;
 static int32_t           s_globe_rot        = 0;
+static bool              s_lock_shaking     = false;
+static int32_t           s_lock_shake_p     = 0;
+static int32_t           s_transition_p     = 0;
 // ── Icon drawing ──────────────────────────────────────────────────────────────
 
 static void icon_fill(GContext *ctx) {
@@ -213,17 +216,21 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
 #else
   int ground_y = car_y + car_h;
 #endif
-  // Quadratic bezier: port → sag to ground → runs off left edge.
-  // As morph_p increases the plug end falls from port to ground, cable lies flat.
+  // Cubic bezier S-bend: cable exits port going slightly backward (right),
+  // sags down, then sweeps left to exit off-screen.
+  // As morph_p increases the plug falls from port to ground and the cable lies flat.
   int slide = (int)CABLE_LERP(0, 20, morph_p);
   int sx = port_x - slide;
   int sy = (int)CABLE_LERP(port_y, ground_y, morph_p);
-  int mx = port_x - slide;
-  int my = ground_y;
   int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
   int ey = ground_y;
+  // Control points: c1 curves right from port (S first bend), c2 approaches ground from above
+  int c1x = (int)CABLE_LERP(sx + 14, sx, morph_p);  // S-bend flattens as plug falls
+  int c1y = sy;
+  int c2x = ex + (int)CABLE_LERP(36, 10, morph_p);
+  int c2y = ey - (int)CABLE_LERP(18, 4, morph_p);
 
-  // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
+  // Two-pass: black outline first, white fill on top
   for (int pass = 0; pass < 2; pass++) {
     if (pass == 0) {
       graphics_context_set_stroke_color(ctx, COLOR_DARK);
@@ -233,18 +240,21 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
       graphics_context_set_stroke_width(ctx, 4);
     }
     GPoint prev = GPoint(sx, sy);
-    for (int i = 1; i <= 8; i++) {
-      int t = i, mt = 8 - i;
-      int px = (mt*mt*sx + 2*mt*t*mx + t*t*ex) / 64;
-      int py = (mt*mt*sy + 2*mt*t*my + t*t*ey) / 64;
+    for (int i = 1; i <= 12; i++) {
+      int t_ = i * 64 / 12, mt_ = 64 - t_;
+      // Cubic bezier: (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3  (t in [0,64])
+      int px = (int)(((int64_t)mt_*mt_*mt_*sx + 3*(int64_t)mt_*mt_*t_*c1x +
+                       3*(int64_t)mt_*t_*t_*c2x + (int64_t)t_*t_*t_*ex) / (64*64*64));
+      int py = (int)(((int64_t)mt_*mt_*mt_*sy + 3*(int64_t)mt_*mt_*t_*c1y +
+                       3*(int64_t)mt_*t_*t_*c2y + (int64_t)t_*t_*t_*ey) / (64*64*64));
       graphics_draw_line(ctx, prev, GPoint(px, py));
       prev = GPoint(px, py);
     }
   }
 }
 
-static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
-  int cx = r.origin.x + r.size.w / 2;
+static void draw_icon_lock(GContext *ctx, GRect r, bool locked, int x_offset) {
+  int cx = r.origin.x + r.size.w / 2 + x_offset;
 
   // Scale body to fit available height. From Figma: body=72×64, shackle adds
   // arm_h(21)+arc_r(16)=37px above body → total ~101px for bw=72.
@@ -334,7 +344,7 @@ static void draw_polyline(GContext *ctx, GPoint *pts, int n) {
 static void draw_mountains(GContext *ctx, GRect bounds) {
   int w = bounds.size.w;
   int h = bounds.size.h;
-  int mh1 = h * 32 / 100;
+  int mh1 = h * 24 / 100;
   int mh2 = h * 40 / 100;
   int px1 = w * 29 / 100;
   int px2 = w * 70 / 100;
@@ -542,7 +552,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
     }
     case PAGE_ODO: {
 #if defined(PBL_PLATFORM_EMERY)
-      int cw = w * 30 / 100;
+      int cw = w * 26 / 100;
 #elif defined(PBL_PLATFORM_CHALK)
       int cw = w * 26 / 100;
 #else
@@ -558,7 +568,11 @@ static CarState car_target_for_page(int page, GRect bounds) {
       int bh  = ch - MAX(ch / 4, 10);
       t.w   = cw;
       t.x   = sx - cw / 2 - 6;
+#if defined(PBL_PLATFORM_EMERY)
+      t.y   = sy - bh + 2;
+#else
       t.y   = sy - bh - 6;
+#endif
       t.rot = -(int32_t)(TRIG_MAX_ANGLE * 25 / 360);
       break;
     }
@@ -578,6 +592,7 @@ static CarState car_target_for_page(int page, GRect bounds) {
 #define LERP_P(a, b, p) ((a) + (int32_t)((int64_t)((b)-(a)) * (p) / ANIMATION_NORMALIZED_MAX))
 
 static void car_anim_update(Animation *anim, const AnimationProgress progress) {
+  s_transition_p = progress;
   s_car_cur.x   = LERP_P(s_car_phase[0].x, s_car_phase[1].x, progress);
   s_car_cur.y   = LERP_P(s_car_phase[0].y, s_car_phase[1].y, progress);
   s_car_cur.w   = LERP_P(s_car_phase[0].w, s_car_phase[1].w, progress);
@@ -617,10 +632,23 @@ static const AnimationImplementation s_car_anim_impl = { .update = car_anim_upda
 static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   GRect bounds = layer_get_bounds(layer);
 
-  // On non-sliding layer so the hint doesn't sweep across screen during transitions
-  if (s_page == PAGE_CLIMATE || s_page == PAGE_LOCK || s_page == PAGE_LOCATION) {
+  // Hint indicator (semi-circle) on right edge for non-car pages; slides in/out
+  bool on_hint  = (s_page == PAGE_CLIMATE || s_page == PAGE_LOCK || s_page == PAGE_LOCATION);
+  bool from_hint = s_animating && (s_anim_from_page == PAGE_CLIMATE ||
+                                   s_anim_from_page == PAGE_LOCK    ||
+                                   s_anim_from_page == PAGE_LOCATION);
+  if (on_hint || from_hint) {
+    int32_t hint_p;
+    if (!s_animating || (on_hint && from_hint)) {
+      hint_p = ANIMATION_NORMALIZED_MAX;
+    } else if (on_hint) {
+      hint_p = s_transition_p;
+    } else {
+      hint_p = ANIMATION_NORMALIZED_MAX - s_transition_p;
+    }
+    int hint_x = (int)LERP_P(bounds.size.w + 26, bounds.size.w + 10, hint_p);
     graphics_context_set_fill_color(ctx, COLOR_DARK);
-    graphics_fill_circle(ctx, GPoint(bounds.size.w + 10, bounds.size.h / 2), 16);
+    graphics_fill_circle(ctx, GPoint(hint_x, bounds.size.h / 2), 16);
   }
 
   if (s_car_cur.w <= 0) return;
@@ -662,16 +690,17 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   bool show_cable = s_state.is_charging &&
     (s_page == PAGE_CHARGE_TIME ||
      (s_animating && s_anim_from_page == PAGE_CHARGE_TIME));
-  if (show_cable) {
-    draw_charging_cable(ctx,
-      (int)s_car_cur.x, (int)s_car_cur.y, cw, ch,
-      bounds.size.w, bounds.size.h, s_cable_anim_p);
-  }
 
   draw_icon_car(ctx,
     GRect((int16_t)s_car_cur.x, (int16_t)s_car_cur.y,
           (int16_t)cw, (int16_t)ch),
     s_car_cur.rot, 0);
+
+  if (show_cable) {
+    draw_charging_cable(ctx,
+      (int)s_car_cur.x, (int)s_car_cur.y, cw, ch,
+      bounds.size.w, bounds.size.h, s_cable_anim_p);
+  }
 }
 
 // ── Page renderers ────────────────────────────────────────────────────────────
@@ -724,9 +753,14 @@ static void draw_page_lock(GContext *ctx, GRect bounds) {
   int icon_y = CONTENT_Y + (bounds.size.h - CONTENT_Y) / 12 + 6;
   int icon_h = bounds.size.h - icon_y - lbl_h - gap - 8;
 
+  int lock_x = 0;
+  if (s_lock_shaking) {
+    int32_t angle = (int32_t)((int64_t)TRIG_MAX_ANGLE * 3 * s_lock_shake_p / ANIMATION_NORMALIZED_MAX);
+    lock_x = 6 * sin_lookup(angle) / TRIG_MAX_RATIO;
+  }
   draw_icon_lock(ctx,
     GRect(INSET_X, icon_y, w, icon_h),
-    s_state.locked);
+    s_state.locked, lock_x);
 
   graphics_context_set_text_color(ctx, COLOR_TEXT);
   draw_text(ctx, s_state.locked ? "locked" : "unlocked",
@@ -961,11 +995,12 @@ static void inbox_dropped(AppMessageResult reason, void *context) {
 // ── Action menu ───────────────────────────────────────────────────────────────
 
 static void action_performed(ActionMenu *menu, const ActionMenuItem *item, void *context) {
+  vibes_short_pulse();
   int act = (int)(intptr_t)action_menu_item_get_action_data(item);
   switch (act) {
     case 0: s_state.climate_on = !s_state.climate_on; send_cmd(CMD_TOGGLE_CLIMATE); break;
     case 1: s_state.locked     = !s_state.locked;     send_cmd(CMD_TOGGLE_LOCK);    break;
-    case 2: vibes_short_pulse(); send_cmd(CMD_HONK); break;
+    case 2: send_cmd(CMD_HONK); break;
     case 3: send_cmd(CMD_NAVIGATE); break;
   }
   layer_mark_dirty(s_canvas);
@@ -1021,15 +1056,42 @@ static void globe_spin_stopped(Animation *anim, bool finished, void *context) {
 }
 static const AnimationImplementation s_globe_spin_impl = { .update = globe_spin_update };
 
+static void lock_shake_update(Animation *anim, const AnimationProgress progress) {
+  s_lock_shake_p = progress;
+  layer_mark_dirty(s_canvas);
+}
+static void lock_shake_stopped(Animation *anim, bool finished, void *context) {
+  s_lock_shaking = false;
+  s_lock_shake_p = 0;
+  layer_mark_dirty(s_canvas);
+}
+static const AnimationImplementation s_lock_shake_impl = { .update = lock_shake_update };
+
+static void globe_intro_update(Animation *anim, const AnimationProgress progress) {
+  s_globe_rot = -(int32_t)((int64_t)(TRIG_MAX_ANGLE / 12) * progress / ANIMATION_NORMALIZED_MAX);
+  layer_mark_dirty(s_canvas);
+}
+static const AnimationImplementation s_globe_intro_impl = { .update = globe_intro_update };
+
 static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
-  if (s_page != PAGE_ODO || s_globe_spinning || s_animating) return;
-  s_globe_spinning = true;
-  Animation *anim = animation_create();
-  animation_set_implementation(anim, &s_globe_spin_impl);
-  animation_set_duration(anim, 1500);
-  animation_set_curve(anim, AnimationCurveEaseInOut);
-  animation_set_handlers(anim, (AnimationHandlers){ .stopped = globe_spin_stopped }, NULL);
-  animation_schedule(anim);
+  if (s_animating) return;
+  if (s_page == PAGE_ODO && !s_globe_spinning) {
+    s_globe_spinning = true;
+    Animation *anim = animation_create();
+    animation_set_implementation(anim, &s_globe_spin_impl);
+    animation_set_duration(anim, 1500);
+    animation_set_curve(anim, AnimationCurveEaseInOut);
+    animation_set_handlers(anim, (AnimationHandlers){ .stopped = globe_spin_stopped }, NULL);
+    animation_schedule(anim);
+  } else if (s_page == PAGE_LOCK && !s_lock_shaking) {
+    s_lock_shaking = true;
+    Animation *anim = animation_create();
+    animation_set_implementation(anim, &s_lock_shake_impl);
+    animation_set_duration(anim, 500);
+    animation_set_curve(anim, AnimationCurveLinear);
+    animation_set_handlers(anim, (AnimationHandlers){ .stopped = lock_shake_stopped }, NULL);
+    animation_schedule(anim);
+  }
 }
 
 // ── Page transition animation ─────────────────────────────────────────────────
@@ -1061,6 +1123,7 @@ static void update_page_indicator(void) {
 
 static void transition_stopped(Animation *anim, bool finished, void *context) {
   s_animating = false;
+  s_transition_p = 0;
   s_ground_morph = false;
   s_cable_anim_p = 0;
   if (s_anim_layer) {
@@ -1070,6 +1133,7 @@ static void transition_stopped(Animation *anim, bool finished, void *context) {
   }
   GRect r = layer_get_bounds(window_get_root_layer(s_window));
   layer_set_frame(s_canvas, r);
+  s_car_cur = car_target_for_page(s_page, r);
   layer_mark_dirty(s_car_layer);
 }
 
@@ -1099,9 +1163,9 @@ static void navigate(int dir) {
 
   PropertyAnimation *pa_in  = property_animation_create_layer_frame(s_canvas, &canvas_start, &canvas_end);
   PropertyAnimation *pa_out = property_animation_create_layer_frame(s_anim_layer, &anim_start, &anim_end);
-  animation_set_duration((Animation*)pa_in,  280);
+  animation_set_duration((Animation*)pa_in,  380);
   animation_set_curve((Animation*)pa_in,  AnimationCurveEaseInOut);
-  animation_set_duration((Animation*)pa_out, 280);
+  animation_set_duration((Animation*)pa_out, 380);
   animation_set_curve((Animation*)pa_out, AnimationCurveEaseInOut);
 
   bool from_car = is_car_page(s_anim_from_page);
@@ -1117,8 +1181,9 @@ static void navigate(int dir) {
     target = s_car_cur;
     target.x -= w;
   } else if (loc_to_odo) {
-    // Car stays at target — already on the globe, no slide-in
-    s_car_phase[0] = target;
+    // Keep car hidden during slide; transition_stopped snaps it to the globe
+    s_car_phase[0] = (CarState){ target.x, (int32_t)(h + 100), target.w, target.rot };
+    s_car_phase[1] = s_car_phase[0];
   } else if (!from_car && to_car) {
     // Car drives in from the navigation edge (e.g. lock → charge_time)
     int32_t enter_x = dir > 0
@@ -1128,14 +1193,24 @@ static void navigate(int dir) {
   } else {
     s_car_phase[0] = s_car_cur;
   }
-  s_car_phase[1] = target;
+  if (!loc_to_odo) s_car_phase[1] = target;
 
   Animation *car_anim = animation_create();
   animation_set_implementation(car_anim, &s_car_anim_impl);
-  animation_set_duration(car_anim, 280);
+  animation_set_duration(car_anim, 380);
   animation_set_curve(car_anim, AnimationCurveEaseInOut);
 
-  // Hide action bar during transition; re-added in transition_stopped if new page needs it
+  // Globe intro: subtle spin when arriving at the odo page from the range page
+  if (s_anim_from_page == PAGE_RANGE && s_page == PAGE_ODO) {
+    s_globe_rot = 0;
+    Animation *intro = animation_create();
+    animation_set_implementation(intro, &s_globe_intro_impl);
+    animation_set_duration(intro, 380);
+    animation_set_curve(intro, AnimationCurveEaseInOut);
+    animation_set_handlers(intro, (AnimationHandlers){ .stopped = globe_spin_stopped }, NULL);
+    animation_schedule(intro);
+  }
+
   Animation *spawn = animation_spawn_create((Animation*)pa_in, (Animation*)pa_out, car_anim, NULL);
   animation_set_handlers(spawn, (AnimationHandlers){ .stopped = transition_stopped }, NULL);
   animation_schedule(spawn);
