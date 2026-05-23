@@ -249,7 +249,11 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   // Scale body to fit available height. From Figma: body=72×64, shackle adds
   // arm_h(21)+arc_r(16)=37px above body → total ~101px for bw=72.
   int max_bw = r.size.h * 5 / 7;
+#if defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
+  int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw);
+#else
   int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw) * 4 / 5;
+#endif
   int bh     = bw * 8 / 9;    // 72→64px (matches Figma body height exactly)
   int arm_h  = bw * 16 / 100; // shorter shackle arms
   int arc_r  = bw * 22 / 100; // 72→16px (center-of-stroke shackle radius)
@@ -343,7 +347,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
 
   {
     GPoint pts[] = {
-      {(int16_t)(-5),           (int16_t)(h+4)},
+      {(int16_t)(-w),           (int16_t)(h+4)},
       {(int16_t)(px1 - run1),   (int16_t)(h+4)},
       {(int16_t)(px1 - 4),      (int16_t)(h-mh1+3)},
       {(int16_t)(px1),          (int16_t)(h-mh1)},
@@ -363,7 +367,7 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
       {(int16_t)(px2),          (int16_t)(h-mh2)},
       {(int16_t)(px2 + 4),      (int16_t)(h-mh2+3)},
       {(int16_t)(px2 + run2),   (int16_t)(h+4)},
-      {(int16_t)(w+5),          (int16_t)(h+4)},
+      {(int16_t)(w*2),          (int16_t)(h+4)},
     };
     GPathInfo info = { .num_points = 6, .points = pts };
     GPath *path = gpath_create(&info);
@@ -1113,8 +1117,8 @@ static void navigate(int dir) {
     target = s_car_cur;
     target.x -= w;
   } else if (loc_to_odo) {
-    // Car arrives from right with the incoming globe canvas
-    s_car_phase[0] = (CarState){ target.x + w, target.y, target.w, target.rot };
+    // Car stays at target — already on the globe, no slide-in
+    s_car_phase[0] = target;
   } else if (!from_car && to_car) {
     // Car drives in from the navigation edge (e.g. lock → charge_time)
     int32_t enter_x = dir > 0
