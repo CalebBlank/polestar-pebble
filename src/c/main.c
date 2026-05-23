@@ -391,7 +391,7 @@ static void draw_globe(GContext *ctx, GRect bounds) {
   // Globe radius and center: shifted right and down to match Figma layout
   int gr = w * 52 / 100;
   int gx = w * 75 / 100;
-  int gy = h + gr / 4;  // center below screen so upper arc is visible
+  int gy = h + gr - 22;  // top of globe == ground line, morph stays below car
 
   // Globe fill + outline
   graphics_context_set_fill_color(ctx, COLOR_FG);
@@ -561,10 +561,10 @@ static CarState car_target_for_page(int page, GRect bounds) {
 #else
       int cw = w * 36 / 100;
 #endif
-      int ch  = cw * 90 / 161;
+      int ch  = cw * 72 / 161;
       int gr  = w * 52 / 100;
       int gx  = w * 75 / 100;
-      int gy  = h + gr / 4;
+      int gy  = h + gr - 22;
       int32_t a25 = TRIG_MAX_ANGLE * 25 / 360;
       int sx  = gx - (int32_t)gr * sin_lookup(a25) / TRIG_MAX_RATIO;
       int sy  = gy - (int32_t)gr * cos_lookup(a25) / TRIG_MAX_RATIO;
@@ -639,13 +639,13 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
   if (s_car_cur.w <= 0) return;
   if ((int)s_car_cur.y >= bounds.size.h) return;  // parked off-screen below
   int cw = (int)s_car_cur.w;
-  int ch = (s_page == PAGE_ODO) ? cw * 90 / 161 : cw * 72 / 161;
+  int ch = cw * 72 / 161;
 
   if (s_ground_morph) {
     int w = bounds.size.w, h = bounds.size.h;
     int gr   = w * 52 / 100;
     int gx   = w * 75 / 100;
-    int gy   = h + gr / 2;  // deep enough that morph top never crosses car
+    int gy   = h + gr - 22;  // top of globe == ground line; morph top stays there always
     int32_t flat_r  = (int32_t)h * 8;
     int32_t flat_cx = w / 2;
     int32_t flat_cy = (int32_t)(h - 22) + flat_r;
@@ -662,9 +662,6 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
     graphics_context_set_fill_color(ctx, COLOR_FG);
     graphics_fill_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
     graphics_draw_circle(ctx, GPoint(cur_cx, cur_cy), (uint16_t)cur_r);
-    // Mask: prevent circle from peeking above the car
-    graphics_context_set_fill_color(ctx, COLOR_BG);
-    graphics_fill_rect(ctx, GRect(0, 0, w, (int)s_car_cur.y), 0, GCornerNone);
   }
 #ifdef PBL_ROUND
   else {
