@@ -68,8 +68,10 @@ static GColor s_color_dim;
 // drop content lower to where the circle left edge ≈ INSET_X.
 #ifdef PBL_ROUND
   #define CONTENT_Y 44
-#else
+#elif defined(PBL_PLATFORM_EMERY) || defined(PBL_PLATFORM_GABBRO)
   #define CONTENT_Y (STATUS_BAR_LAYER_HEIGHT + 2)
+#else
+  #define CONTENT_Y (STATUS_BAR_LAYER_HEIGHT - 5)
 #endif
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -220,7 +222,8 @@ static void draw_charging_cable(GContext *ctx, int car_x, int car_y,
   int mx = port_x;
   int my = (int)CABLE_LERP(ground_y, port_y, morph_p);
   int ex = (int)CABLE_LERP(-4, -(car_x + car_w + 20), morph_p);
-  int ey = ground_y;
+  // Cable end falls below screen as it sweeps away
+  int ey = ground_y + (int)CABLE_LERP(0, bounds_h / 4, morph_p);
 
   // Two-pass: black outline first, white fill on top (rounded ends from draw_line)
   for (int pass = 0; pass < 2; pass++) {
@@ -248,7 +251,7 @@ static void draw_icon_lock(GContext *ctx, GRect r, bool locked) {
   // Scale body to fit available height. From Figma: body=72×64, shackle adds
   // arm_h(21)+arc_r(16)=37px above body → total ~101px for bw=72.
   int max_bw = r.size.h * 5 / 7;
-  int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw);
+  int bw = MIN(MIN(r.size.w * 7 / 10, 72), max_bw) * 4 / 5;
   int bh     = bw * 8 / 9;    // 72→64px (matches Figma body height exactly)
   int arm_h  = bw * 16 / 100; // shorter shackle arms
   int arc_r  = bw * 22 / 100; // 72→16px (center-of-stroke shackle radius)
@@ -333,8 +336,8 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
   int mh2 = h * 40 / 100;
   int px1 = w * 29 / 100;
   int px2 = w * 70 / 100;
-  int run1 = mh1 * 13 / 15;
-  int run2 = mh2 * 13 / 15;
+  int run1 = mh1 * 15 / 13;
+  int run2 = mh2 * 15 / 13;
 
   graphics_context_set_fill_color(ctx, COLOR_FG);
   graphics_context_set_stroke_color(ctx, COLOR_DARK);
@@ -371,41 +374,6 @@ static void draw_mountains(GContext *ctx, GRect bounds) {
     gpath_destroy(path);
   }
 
-  // Zigzag: symmetric teeth, slope angle matches the mountain sides.
-  graphics_context_set_stroke_color(ctx, COLOR_DARK);
-  graphics_context_set_stroke_width(ctx, 4);
-  {
-    int amp = MAX(mh1 / 10, 6);
-    int dx  = 2 * amp * run1 / mh1;
-    int n   = 3;
-    int xl  = px1 - n * dx;
-    int zy  = (h - mh1) + mh1 * 75 / 100;
-    GPoint prev = {0, 0};
-    int x = xl, y = zy + amp;
-    for (int i = 0; i <= 2 * n; i++) {
-      GPoint pt = {(int16_t)x, (int16_t)y};
-      if (i > 0) graphics_draw_line(ctx, prev, pt);
-      prev = pt;
-      x += dx;
-      y = (y == zy + amp) ? zy - amp : zy + amp;
-    }
-  }
-  {
-    int amp = MAX(mh2 / 10, 6);
-    int dx  = 2 * amp * run2 / mh2;
-    int n   = 3;
-    int xl  = px2 - n * dx;
-    int zy  = (h - mh2) + mh2 * 75 / 100;
-    GPoint prev = {0, 0};
-    int x = xl, y = zy + amp;
-    for (int i = 0; i <= 2 * n; i++) {
-      GPoint pt = {(int16_t)x, (int16_t)y};
-      if (i > 0) graphics_draw_line(ctx, prev, pt);
-      prev = pt;
-      x += dx;
-      y = (y == zy + amp) ? zy - amp : zy + amp;
-    }
-  }
 }
 
 static GPoint globe_pt(int gx, int gy, int gr, int sx, int sy, int32_t ca, int32_t sa) {
@@ -622,8 +590,8 @@ static void car_anim_update(Animation *anim, const AnimationProgress progress) {
   s_car_cur.w   = LERP_P(s_car_phase[0].w, s_car_phase[1].w, progress);
   s_car_cur.rot = LERP_P(s_car_phase[0].rot, s_car_phase[1].rot, progress);
   if (s_ground_morph) {
-    // Delay ground morph 100ms into the 280ms animation before it starts morphing
-    int32_t gm_delay = ANIMATION_NORMALIZED_MAX * 100 / 280;
+    // Delay ground morph 250ms into the 280ms animation before it starts morphing
+    int32_t gm_delay = ANIMATION_NORMALIZED_MAX * 250 / 280;
     s_ground_morph_p = progress <= gm_delay ? 0
       : (int32_t)((int64_t)(progress - gm_delay) * ANIMATION_NORMALIZED_MAX
                   / (ANIMATION_NORMALIZED_MAX - gm_delay));
@@ -671,7 +639,7 @@ static void car_layer_update_proc(Layer *layer, GContext *ctx) {
     int w = bounds.size.w, h = bounds.size.h;
     int gr   = w * 52 / 100;
     int gx   = w * 75 / 100;
-    int gy   = h + gr / 4;
+    int gy   = h + gr / 2;  // deep enough that morph top never crosses car
     int32_t flat_r  = (int32_t)h * 8;
     int32_t flat_cx = w / 2;
     int32_t flat_cy = (int32_t)(h - 22) + flat_r;
@@ -826,7 +794,7 @@ static void draw_page_charge_pct(GContext *ctx, GRect bounds) {
   int glyph_y  = CONTENT_Y + 13;
 #endif
   draw_percent_glyph(ctx,
-    GPoint(INSET_X + digits * digit_w - 4, glyph_y),
+    GPoint(INSET_X + digits * digit_w - 10, glyph_y),
     glyph_sz);
 }
 
@@ -837,7 +805,7 @@ static void draw_page_range(GContext *ctx, GRect bounds) {
     : (int)(s_state.range_km * 621 / 1000);
   snprintf(num, sizeof(num), "%d", val);
   draw_big_stat(ctx, bounds, num,
-    s_state.use_metric ? "kilometer\nrange" : "mile\nrange", true, 0, 0);
+    s_state.use_metric ? "kilometer\nrange" : "mile range", true, 0, 0);
   draw_mountains(ctx, bounds);
 }
 

@@ -402,7 +402,7 @@ function buildClayConfig() {
     { 'type': 'section', 'items': [
       { 'type': 'heading', 'defaultValue': 'Display' },
       { 'type': 'toggle', 'messageKey': 'SETTING_LIGHT_TEXT',
-        'label': 'Black text (light mode)', 'defaultValue': light }
+        'label': 'Black text', 'defaultValue': light }
     ]},
     { 'type': 'submit', 'defaultValue': 'Save & Refresh' }
   ];
@@ -440,11 +440,13 @@ Pebble.addEventListener('webviewclosed', function(e) {
     var msg = {};
     msg[KEY_SETTING_UNITS]      = metric ? 1 : 0;
     msg[KEY_SETTING_LIGHT_TEXT] = light  ? 1 : 0;
-    // Fetch car data after settings ACK so the two messages don't collide
+    // Only refresh car data if credentials were just entered; a settings-only
+    // change (units, light text) must not overwrite the current lock/climate state.
+    var credentialsChanged = !!(email || password);
     Pebble.sendAppMessage(msg, function() {
-      handleCmd(CMD_REFRESH);
+      if (credentialsChanged) handleCmd(CMD_REFRESH);
     }, function() {
-      handleCmd(CMD_REFRESH);
+      if (credentialsChanged) handleCmd(CMD_REFRESH);
     });
   } catch(e4) {
     console.log('webviewclosed error: ' + e4);
