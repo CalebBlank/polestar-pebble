@@ -1042,7 +1042,7 @@ static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
   s_globe_spinning = true;
   Animation *anim = animation_create();
   animation_set_implementation(anim, &s_globe_spin_impl);
-  animation_set_duration(anim, 800);
+  animation_set_duration(anim, 1500);
   animation_set_curve(anim, AnimationCurveEaseInOut);
   animation_set_handlers(anim, (AnimationHandlers){ .stopped = globe_spin_stopped }, NULL);
   animation_schedule(anim);
